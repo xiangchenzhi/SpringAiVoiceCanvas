@@ -24,6 +24,7 @@ public class MemoryAdvisor implements CallAdvisor, Ordered {
     private static final Logger log = LoggerFactory.getLogger(MemoryAdvisor.class);
 
     private static final ThreadLocal<String> CONVERSATION_ID_HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<String> BRANCH_MEMORY_KEY_HOLDER = new ThreadLocal<>();
 
     private final RedisChatMemoryService memoryService;
 
@@ -31,16 +32,25 @@ public class MemoryAdvisor implements CallAdvisor, Ordered {
         this.memoryService = memoryService;
     }
 
-    /**
-     * 在调用前设置当前线程的会话ID，MemoryAdvisor 会自动从 ThreadLocal 读取。
-     * 调用结束后必须调用 clear()。
-     */
     public static void setConversationId(String conversationId) {
         CONVERSATION_ID_HOLDER.set(conversationId);
     }
 
     public static void clearConversationId() {
         CONVERSATION_ID_HOLDER.remove();
+    }
+
+    /**
+     * 分支模式：直接指定使用的 Redis memory suffix。
+     * 调用方须先将父版本记忆复制到临时 key，然后将临时 key 传入。
+     * 此模式下读写的是临时 key，不会污染父版本。
+     */
+    public static void setBranchMemoryKey(String memorySuffix) {
+        BRANCH_MEMORY_KEY_HOLDER.set(memorySuffix);
+    }
+
+    public static void clearBranchMemory() {
+        BRANCH_MEMORY_KEY_HOLDER.remove();
     }
 
     @Override
@@ -56,11 +66,20 @@ public class MemoryAdvisor implements CallAdvisor, Ordered {
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
         String conversationId = CONVERSATION_ID_HOLDER.get();
-        if (conversationId == null || conversationId.isBlank()) {
+        String branchMemoryKey = BRANCH_MEMORY_KEY_HOLDER.get();
+
+        // 分支模式优先：使用调用方准备的临时 key，不会污染父版本
+        // 正常模式：chat:memory:{conversationId}
+        String memorySuffix;
+        if (branchMemoryKey != null && !branchMemoryKey.isBlank()) {
+            memorySuffix = branchMemoryKey;
+        } else if (conversationId != null && !conversationId.isBlank()) {
+            memorySuffix = conversationId;
+        } else {
             return chain.nextCall(request);
         }
 
-        List<HistoryMessage> history = memoryService.getHistory(conversationId);
+        List<HistoryMessage> history = memoryService.getHistory(memorySuffix);
         String userText = request.prompt().getUserMessage().getText();
 
         ChatClientRequest enrichedRequest = request;
@@ -86,7 +105,7 @@ public class MemoryAdvisor implements CallAdvisor, Ordered {
         try {
             String assistantText = response.chatResponse().getResult().getOutput().getText();
             if (assistantText != null && !assistantText.isBlank()) {
-                memoryService.saveExchange(conversationId, userText, assistantText);
+                memoryService.saveExchange(memorySuffix, userText, assistantText);
             }
         } catch (Exception e) {
             log.warn("保存对话记忆失败: {}", e.getMessage());

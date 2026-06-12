@@ -84,7 +84,7 @@ public class AIService {
             MemoryAdvisor.setConversationId(conversationId);
             rawResponse = chatClient.prompt()
                     .user(userMessage)
-                    .advisors(memoryAdvisor, diagramAdvisor)
+                    .advisors(diagramAdvisor, memoryAdvisor)
                     .call()
                     .chatResponse()
                     .getResult()

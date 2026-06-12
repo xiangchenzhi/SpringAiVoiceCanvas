@@ -1,6 +1,5 @@
 package com.xcodez.springaivoicecanvas.Service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xcodez.springaivoicecanvas.model.Conversation;
 import com.xcodez.springaivoicecanvas.repository.ConversationRepository;
 import org.slf4j.Logger;
@@ -9,11 +8,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 public class ConversationService {
@@ -22,16 +17,14 @@ public class ConversationService {
 
     private final ConversationRepository repo;
     private final ChatClient chatClient;
-    private final ObjectMapper objectMapper;
 
-    public ConversationService(ConversationRepository repo, ChatClient chatClient, ObjectMapper objectMapper) {
+    public ConversationService(ConversationRepository repo, ChatClient chatClient) {
         this.repo = repo;
         this.chatClient = chatClient;
-        this.objectMapper = objectMapper;
     }
 
-    public Conversation create(String type) {
-        Conversation c = new Conversation(UUID.randomUUID().toString(), type);
+    public Conversation create(String conversationType) {
+        Conversation c = new Conversation(UUID.randomUUID().toString(), conversationType);
         return repo.save(c);
     }
 
@@ -45,16 +38,44 @@ public class ConversationService {
         return repo.findById(id).orElse(null);
     }
 
-    public void updateResult(String id, String type, String imageUrl, Object resultObj) {
-        repo.findById(id).ifPresent(c -> {
-            c.setType(type);
-            c.setLastImageUrl(imageUrl);
-            try {
-                c.setLastResult(resultObj != null ? objectMapper.writeValueAsString(resultObj) : null);
-            } catch (Exception ignored) {}
-            c.setUpdatedAt(LocalDateTime.now());
-            repo.save(c);
+    public void setRootVersion(String conversationId, String versionId) {
+        safeSave(conversationId, "setRootVersion", c -> {
+            c.setRootVersionId(versionId);
+            c.setCurrentVersionId(versionId);
         });
+    }
+
+    public void updateConversationType(String conversationId, String conversationType) {
+        safeSave(conversationId, "updateConversationType", c -> {
+            c.setConversationType(conversationType);
+        });
+    }
+
+    public void switchToVersion(String conversationId, String versionId) {
+        safeSave(conversationId, "switchToVersion", c -> {
+            c.setCurrentVersionId(versionId);
+        });
+    }
+
+    public void updateMeta(String conversationId, String lastType, String imageUrl) {
+        safeSave(conversationId, "updateMeta", c -> {
+            if (lastType != null) c.setLastType(lastType.substring(0, Math.min(lastType.length(), 48)));
+            if (imageUrl != null) c.setLastImageUrl(imageUrl);
+        });
+    }
+
+    /**
+     * 安全保存：失败时记录日志但不抛异常，确保其他流程不受影响
+     */
+    private void safeSave(String conversationId, String op, java.util.function.Consumer<Conversation> modifier) {
+        try {
+            repo.findById(conversationId).ifPresent(c -> {
+                modifier.accept(c);
+                repo.save(c);
+            });
+        } catch (Exception e) {
+            log.warn("Conversation {} 操作失败 (列宽不匹配? 请手动删表重建): {}", op, e.getMessage());
+        }
     }
 
     @Async
@@ -67,10 +88,7 @@ public class ConversationService {
                     .trim()
                     .replaceAll("^[\"「]|[\"」]$", "");
 
-            repo.findById(conversationId).ifPresent(c -> {
-                c.setTitle(title);
-                repo.save(c);
-            });
+            safeSave(conversationId, "generateTitle", c -> c.setTitle(title));
         } catch (Exception e) {
             log.warn("生成会话标题失败: {}", e.getMessage());
         }

@@ -14,6 +14,17 @@
         <h1 class="app-title">DiagramGPT</h1>
         <span class="intent-badge" v-if="activeType">{{ labelForType(activeType) }}</span>
         <span class="session-title" v-if="currentTitle">{{ currentTitle }}</span>
+        <span v-if="parentVersionId" class="branch-badge">分支模式</span>
+        <div class="topbar-spacer"></div>
+        <button
+          v-if="conversationId && versionTree.length > 0"
+          class="version-btn"
+          @click="showVersionPopover = true"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+          版本历史
+          <span class="version-btn-count">{{ versionTree.length }}</span>
+        </button>
       </div>
 
       <DrawingCanvas v-if="activeType === 'shape'" :shapes="shapes" />
@@ -29,6 +40,16 @@
 
     <!-- ========== 右侧 AI 面板 ========== -->
     <div class="ai-panel">
+      <!-- 分支模式提示 -->
+      <div class="branch-panel" v-if="parentVersionId">
+        <div class="branch-panel-inner">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+          <span>分支模式 — 下次输入从此版本创建新分支</span>
+          <button class="vp-cancel-btn" @click="cancelBranch">取消</button>
+        </div>
+      </div>
+
+      <!-- 执行日志 -->
       <ProcessLog :entries="processLog" />
 
       <div class="chat-input-area">
@@ -49,6 +70,17 @@
         </div>
       </div>
     </div>
+
+    <!-- 版本历史悬浮弹窗 -->
+    <VersionTree
+      :visible="showVersionPopover"
+      :tree="versionTree"
+      :activeId="currentVersionId"
+      :selectedId="selectedVersionId"
+      @close="showVersionPopover = false"
+      @select-node="selectVersion"
+      @continue-from="onContinueFromVersion"
+    />
   </div>
 </template>
 
@@ -59,8 +91,9 @@ import DiagramCanvas from './components/DiagramCanvas.vue'
 import ImageCanvas from './components/ImageCanvas.vue'
 import ProcessLog from './components/ProcessLog.vue'
 import Sidebar from './components/Sidebar.vue'
+import VersionTree from './components/VersionTree.vue'
 import { sendIntent } from './api/intentApi.js'
-import { fetchConversations, fetchConversation } from './api/conversationApi.js'
+import { fetchConversations, fetchConversation, fetchVersionTree, fetchVersionDetail, switchVersion } from './api/conversationApi.js'
 
 const activeType = ref('')
 const shapes = ref([])
@@ -73,6 +106,11 @@ const loading = ref(false)
 const conversationId = ref('')
 const conversationList = ref([])
 const currentTitle = ref('')
+const currentVersionId = ref('')
+const parentVersionId = ref('')
+const versionTree = ref([])
+const selectedVersionId = ref('')
+const showVersionPopover = ref(false)
 
 onMounted(() => refreshConversationList())
 
@@ -116,58 +154,55 @@ async function submitText() {
 
   try {
     addLog('正在理解你的意图...', 'info')
-    const data = await sendIntent(text, conversationId.value)
+    const data = await sendIntent(text, conversationId.value, parentVersionId.value)
 
     if (data.error) {
       addLog(`错误: ${data.error}`, 'error')
       return
     }
 
-    // 服务器返回的 conversationId（新会话时生成）
+    // 使用服务器返回的 processLogs
+    processLog.length = 0
+    const logs = data.processLogs || []
+    logs.forEach(l => addLog(l.content, l.level))
+
     if (data.conversationId) {
       conversationId.value = data.conversationId
       currentTitle.value = data.title || ''
     }
 
     const type = data.type
-    addLog(`识别意图: ${labelForType(type)}`, 'success')
     activeType.value = type
 
     if (type === 'shape') {
       shapes.value = []
       const commands = data.commands || []
-      addLog(`解析出 ${commands.length} 个绘图操作`, 'success')
-      commands.forEach(cmd => {
-        executeCommand(cmd)
-        addLog(`${cmd.action}`, 'info')
-      })
-      addLog('渲染完成', 'success')
+      commands.forEach(cmd => executeCommand(cmd))
     } else if (type === 'diagram') {
       const d = data.diagram
       if (!d) { addLog('未能解析出图表结构', 'error'); return }
-      addLog(`图表类型: ${labelForDiagram(d.type)}`, 'success')
-      const nodes = d.nodes || []
-      addLog(`提取 ${nodes.length} 个节点`, 'info')
-      nodes.forEach(n => addLog(`  ${n.label}`, 'node'))
-      if ((d.edges || []).length > 0) addLog(`构建 ${d.edges.length} 条关系`, 'info')
-      addLog('自动布局中...', 'info')
       diagram.value = d
       await nextTick()
       addLog('渲染完成', 'success')
     } else if (type === 'image') {
-      const enhanced = data.enhancedPrompt || ''
-      addLog('正在优化提示词...', 'info')
       loadingStep.value = 'enhancing'
-      addLog(`原始输入: ${text}`, 'info')
-      addLog(`优化后提示词: ${enhanced}`, 'node')
-      loadingStep.value = 'generating'
-      addLog('正在生成图片...', 'info')
+      await nextTick()
       imageUrl.value = data.imageUrl
       await nextTick()
-      addLog('图片生成完成', 'success')
+    }
+
+    if (data.versionId) {
+      currentVersionId.value = data.versionId
+    }
+
+    // 分支模式：不清空，更新到新版本（继续沿分支走下去）
+    // 正常模式：不设置 parentVersionId
+    if (parentVersionId.value) {
+      parentVersionId.value = data.versionId || parentVersionId.value
     }
 
     refreshConversationList()
+    refreshVersionTree()
   } catch (e) {
     console.error(e)
     addLog(`错误: ${e.message}`, 'error')
@@ -180,11 +215,15 @@ async function submitText() {
 function newConversation() {
   conversationId.value = ''
   currentTitle.value = ''
+  currentVersionId.value = ''
   activeType.value = ''
   shapes.value = []
   diagram.value = null
   imageUrl.value = ''
   processLog.length = 0
+  parentVersionId.value = ''
+  versionTree.value = []
+  selectedVersionId.value = ''
 }
 
 async function loadConversation(id) {
@@ -194,35 +233,121 @@ async function loadConversation(id) {
     processLog.length = 0
     conversationId.value = c.id
     currentTitle.value = c.title || ''
+    currentVersionId.value = c.currentVersionId || ''
+    parentVersionId.value = ''
+    selectedVersionId.value = ''
 
-    if (!c.type) { activeType.value = ''; return }
-    activeType.value = c.type
-
-    if (c.type === 'image') {
+    const convType = c.conversationType || c.lastType || ''
+    if (!convType) { activeType.value = '' }
+    else if (convType === 'IMAGE') {
+      activeType.value = 'image'
       imageUrl.value = c.lastImageUrl || ''
-    } else if (c.lastResult) {
-      try {
-        const data = JSON.parse(c.lastResult)
-        if (c.type === 'diagram') {
-          diagram.value = data
-        } else if (c.type === 'shape') {
-          shapes.value = []
-          data.forEach(cmd => executeCommand(cmd))
+    } else {
+      if (c.diagramJson) {
+        try {
+          const data = JSON.parse(c.diagramJson)
+          if (c.lastType === 'shape') {
+            activeType.value = 'shape'
+            shapes.value = []
+            data.forEach(cmd => executeCommand(cmd))
+          } else {
+            activeType.value = 'diagram'
+            diagram.value = data
+          }
+        } catch (e) {
+          activeType.value = c.lastType || 'diagram'
         }
-      } catch (e) { /* ignore */ }
+      } else {
+        activeType.value = c.conversationType === 'IMAGE' ? 'image' : ''
+      }
     }
+
+    refreshVersionTree()
   } catch (e) {
     console.error(e)
   }
 }
 
-function labelForType(t) {
-  const m = { shape: '自由绘图', diagram: '图表生成', image: 'AI 绘画' }
-  return m[t] || t
+async function refreshVersionTree() {
+  if (!conversationId.value) return
+  try {
+    versionTree.value = await fetchVersionTree(conversationId.value)
+  } catch (e) { /* ignore */ }
 }
 
-function labelForDiagram(t) {
-  const m = { flowchart: '流程图', mindmap: '思维导图', er: 'ER 图', architecture: '架构图' }
+async function selectVersion(versionId) {
+  selectedVersionId.value = versionId
+  parentVersionId.value = ''
+  try {
+    if (conversationId.value) {
+      await switchVersion(conversationId.value, versionId)
+      currentVersionId.value = versionId
+    }
+    const detail = await fetchVersionDetail(versionId)
+    if (detail.logs) {
+      processLog.length = 0
+      detail.logs.forEach(l => addLog(l.content, l.level || 'info'))
+    }
+    if (detail.diagramJson) {
+      try {
+        const data = JSON.parse(detail.diagramJson)
+        if (detail.diagramJson.startsWith('{"imageUrl"')) {
+          activeType.value = 'image'
+          imageUrl.value = data.imageUrl || ''
+        } else if (Array.isArray(data)) {
+          activeType.value = 'shape'
+          shapes.value = []
+          data.forEach(cmd => executeCommand(cmd))
+        } else {
+          activeType.value = 'diagram'
+          diagram.value = data
+        }
+      } catch (e) { /* ignore */ }
+    }
+    await refreshVersionTree()
+    refreshConversationList()
+  } catch (e) { /* ignore */ }
+}
+
+async function continueFromVersion(versionId) {
+  parentVersionId.value = versionId
+  selectedVersionId.value = versionId
+  showVersionPopover.value = false
+  // 从该版本恢复画布
+  try {
+    const detail = await fetchVersionDetail(versionId)
+    if (detail.diagramJson) {
+      try {
+        const data = JSON.parse(detail.diagramJson)
+        // image 类型特殊处理
+        if (detail.diagramJson.startsWith('{"imageUrl"')) {
+          if (activeType.value !== 'image') activeType.value = 'image'
+          imageUrl.value = data.imageUrl || ''
+        } else if (Array.isArray(data)) {
+          activeType.value = 'shape'
+          shapes.value = []
+          data.forEach(cmd => executeCommand(cmd))
+        } else {
+          activeType.value = 'diagram'
+          diagram.value = data
+        }
+      } catch (e) { /* ignore */ }
+    }
+    addLog('已切换到版本，下次输入将从此版本创建分支', 'info')
+  } catch (e) { /* ignore */ }
+}
+
+function onContinueFromVersion(versionId) {
+  continueFromVersion(versionId)
+}
+
+function cancelBranch() {
+  parentVersionId.value = ''
+  selectedVersionId.value = ''
+}
+
+function labelForType(t) {
+  const m = { shape: '自由绘图', diagram: '图表生成', image: 'AI 绘画' }
   return m[t] || t
 }
 </script>
@@ -260,6 +385,34 @@ body {
   font-size: 13px; color: #64748b; margin-left: 4px;
   max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.branch-badge {
+  font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 6px;
+  background: #f59e0b22; color: #f59e0b; border: 1px solid #f59e0b44;
+}
+.topbar-spacer { flex: 1; }
+.version-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 8px;
+  border: 1px solid #334155; background: #1e293b;
+  color: #cbd5e1; font-size: 13px; cursor: pointer;
+  transition: all 0.15s;
+}
+.version-btn:hover { border-color: #60a5fa; color: #e2e8f0; background: #1e3050; }
+.version-btn svg { opacity: 0.6; }
+.version-btn:hover svg { opacity: 1; }
+.version-btn-count {
+  font-size: 11px; background: #334155; color: #94a3b8;
+  padding: 1px 6px; border-radius: 8px; min-width: 18px; text-align: center;
+}
+.branch-panel {
+  padding: 8px 12px; border-bottom: 1px solid #334155; flex-shrink: 0;
+}
+.branch-panel-inner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 8px;
+  background: #f59e0b11; border: 1px solid #f59e0b33;
+  font-size: 12px; color: #f59e0b;
+}
 .empty-canvas {
   flex: 1; display: flex; flex-direction: column; align-items: center;
   justify-content: center; background: #f8fafc; color: #94a3b8; gap: 8px;
@@ -271,7 +424,13 @@ body {
   background: #1e293b; border-left: 1px solid #334155;
   display: flex; flex-direction: column; overflow: hidden;
 }
-.chat-input-area { padding: 12px; border-top: 1px solid #334155; flex-shrink: 0; }
+.vp-cancel-btn {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  border: 1px solid #f59e0b44; background: transparent; color: #f59e0b;
+  cursor: pointer;
+}
+.vp-cancel-btn:hover { background: #f59e0b22; }
+.chat-input-area { padding: 12px; border-top: 1px solid #334155; flex-shrink: 0; margin-top: auto; }
 .chat-textarea {
   width: 100%; padding: 12px; border-radius: 10px;
   border: 1px solid #475569; background: #0f172a; color: #e2e8f0;

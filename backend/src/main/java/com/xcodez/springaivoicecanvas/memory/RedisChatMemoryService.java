@@ -62,4 +62,18 @@ public class RedisChatMemoryService {
     public void clearHistory(String conversationId) {
         redisTemplate.delete(buildKey(conversationId));
     }
+
+    /** 分支时复制父版本记忆到新版本 */
+    public void copyMemory(String fromSuffix, String toSuffix) {
+        String json = redisTemplate.opsForValue().get(buildKey(fromSuffix));
+        if (json != null && !json.isBlank()) {
+            redisTemplate.opsForValue().set(buildKey(toSuffix), json);
+        }
+    }
+
+    /** 移动记忆（复制并删除源） */
+    public void moveMemory(String fromSuffix, String toSuffix) {
+        copyMemory(fromSuffix, toSuffix);
+        redisTemplate.delete(buildKey(fromSuffix));
+    }
 }

@@ -14,11 +14,11 @@
         @click="$emit('select', c.id)"
       >
         <div class="item-type">
-          <span class="type-dot" :class="'dot-' + (c.type || 'image')"></span>
+          <span class="type-dot" :class="'dot-' + (c.lastType || 'image')"></span>
         </div>
         <div class="item-body">
           <div class="item-title">{{ c.title || '未命名会话' }}</div>
-          <div class="item-meta">{{ labelForType(c.type) }} · {{ timeAgo(c.updatedAt) }}</div>
+          <div class="item-meta">{{ labelForType(c.conversationType) }} · {{ timeAgo(c.updatedAt) }}</div>
         </div>
       </div>
       <div v-if="conversations.length === 0" class="sidebar-empty">
@@ -37,8 +37,8 @@ defineProps({
 defineEmits(['select', 'new-conversation'])
 
 function labelForType(t) {
-  const m = { shape: '自由绘图', diagram: '图表生成', image: 'AI 绘画' }
-  return m[t] || 'AI 绘画'
+  const m = { DIAGRAM: '图表生成', IMAGE: 'AI 绘画' }
+  return m[t] || '混合会话'
 }
 
 function timeAgo(ts) {

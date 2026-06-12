@@ -12,12 +12,16 @@
           <button :class="['mode-btn', { active: mode === 'diagram' }]" @click="switchMode('diagram')">
             <span class="mode-icon">📊</span> 图表生成
           </button>
+          <button :class="['mode-btn', { active: mode === 'image' }]" @click="switchMode('image')">
+            <span class="mode-icon">🖼️</span> 图片生成
+          </button>
         </div>
       </div>
 
       <!-- 画布 -->
       <DrawingCanvas v-if="mode === 'shape'" :shapes="shapes" />
       <DiagramCanvas v-if="mode === 'diagram'" :diagram="diagram" />
+      <ImageCanvas v-if="mode === 'image'" :imageUrl="imageUrl" :loading="loading" :loadingStep="loadingStep" />
     </div>
 
     <!-- ========== 右侧 AI 面板 (20%) ========== -->
@@ -32,7 +36,9 @@
           class="chat-textarea"
           :placeholder="mode === 'shape'
             ? '描述你想画的图形...'
-            : '描述你想要的图表...'"
+            : mode === 'diagram'
+              ? '描述你想要的图表...'
+              : '描述你想要的图片...'"
           rows="3"
           @keydown.enter.exact="submitText"
           :disabled="loading"
@@ -53,13 +59,17 @@
 import { ref, reactive, nextTick } from 'vue'
 import DrawingCanvas from './components/DrawingCanvas.vue'
 import DiagramCanvas from './components/DiagramCanvas.vue'
+import ImageCanvas from './components/ImageCanvas.vue'
 import ProcessLog from './components/ProcessLog.vue'
 import { sendVoiceCommand } from './api/voiceApi.js'
 import { sendDiagramCommand } from './api/diagramApi.js'
+import { generateImage } from './api/imageApi.js'
 
 const mode = ref('shape')
 const shapes = ref([])
 const diagram = ref(null)
+const imageUrl = ref('')
+const loadingStep = ref('')
 const processLog = reactive([])
 const inputText = ref('')
 const loading = ref(false)
@@ -68,6 +78,8 @@ function switchMode(m) {
   mode.value = m
   diagram.value = null
   shapes.value = []
+  imageUrl.value = ''
+  loadingStep.value = ''
   processLog.length = 0
 }
 
@@ -139,7 +151,7 @@ async function submitText() {
         addLog(`${cmd.action}: ${JSON.stringify(cmd.params)}`, 'info')
       })
       addLog('渲染完成', 'success')
-    } else {
+    } else if (mode.value === 'diagram') {
       addLog('正在分析图表需求...', 'info')
       const data = await sendDiagramCommand(text)
       const d = data.diagram
@@ -159,12 +171,28 @@ async function submitText() {
       diagram.value = d
       await nextTick()
       addLog('渲染完成 ✓', 'success')
+    } else if (mode.value === 'image') {
+      addLog('正在优化提示词...', 'info')
+      loadingStep.value = 'enhancing'
+      const data = await generateImage(text)
+
+      addLog(`原始输入: ${text}`, 'info')
+      const enhanced = data.enhancedPrompt || ''
+      addLog(`优化后提示词: ${enhanced}`, 'node')
+
+      loadingStep.value = 'generating'
+      addLog('正在生成图片...', 'info')
+
+      imageUrl.value = data.imageUrl
+      await nextTick()
+      addLog('图片生成完成 ✓', 'success')
     }
   } catch (e) {
     console.error(e)
-    addLog('解析失败，请重试', 'error')
+    addLog(`错误: ${e.message}`, 'error')
   } finally {
     loading.value = false
+    loadingStep.value = ''
   }
 }
 

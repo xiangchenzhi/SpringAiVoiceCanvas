@@ -6,3 +6,6 @@ spring:
       chat:
         options:
           model: deepseek-chat
+siliconflow:
+  api-key: sk-tpbgmnzouqwinswmpovtmyzdyxgapekrkfxjwcrmxatxmilp
+  image-url: https://api.siliconflow.cn/v1/images/generations

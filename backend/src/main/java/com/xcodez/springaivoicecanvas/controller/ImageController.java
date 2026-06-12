@@ -28,7 +28,7 @@ public class ImageController {
         }
 
         try {
-            ImageGenerateService.ImageResult result = imageService.generate(prompt);
+            ImageGenerateService.ImageResult result = imageService.generate(prompt, "");
             return Map.of(
                     "imageUrl", result.imageUrl() != null ? result.imageUrl() : "",
                     "originalPrompt", result.originalPrompt(),

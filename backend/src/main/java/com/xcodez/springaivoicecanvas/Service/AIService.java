@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xcodez.springaivoicecanvas.advisor.DiagramAdvisor;
 import com.xcodez.springaivoicecanvas.advisor.DrawingCommandAdvisor;
+import com.xcodez.springaivoicecanvas.advisor.IntentAdvisor;
+import com.xcodez.springaivoicecanvas.advisor.MemoryAdvisor;
 import com.xcodez.springaivoicecanvas.model.Diagram;
 import com.xcodez.springaivoicecanvas.model.ShapeCommand;
 import org.springframework.ai.chat.client.ChatClient;
@@ -17,30 +19,56 @@ public class AIService {
     private final ChatClient chatClient;
     private final DrawingCommandAdvisor commandAdvisor;
     private final DiagramAdvisor diagramAdvisor;
+    private final IntentAdvisor intentAdvisor;
+    private final MemoryAdvisor memoryAdvisor;
     private final ObjectMapper objectMapper;
 
     public AIService(ChatClient chatClient,
                      DrawingCommandAdvisor commandAdvisor,
                      DiagramAdvisor diagramAdvisor,
+                     IntentAdvisor intentAdvisor,
+                     MemoryAdvisor memoryAdvisor,
                      ObjectMapper objectMapper) {
         this.chatClient = chatClient;
         this.commandAdvisor = commandAdvisor;
         this.diagramAdvisor = diagramAdvisor;
+        this.intentAdvisor = intentAdvisor;
+        this.memoryAdvisor = memoryAdvisor;
         this.objectMapper = objectMapper;
     }
 
-    /**
-     * Phase 1: 将用户的自然语言指令转换为结构化的绘图命令列表
-     */
-    public List<ShapeCommand> parseVoiceCommand(String userMessage) {
-        String rawResponse = chatClient.prompt()
-                .user(userMessage)
-                .advisors(commandAdvisor)
-                .call()
-                .chatResponse()
-                .getResult()
-                .getOutput()
-                .getText();
+    public String classifyIntent(String userMessage, String conversationId) {
+        String result;
+        try {
+            MemoryAdvisor.setConversationId(conversationId);
+            result = chatClient.prompt()
+                    .user(userMessage)
+                    .advisors(intentAdvisor, memoryAdvisor)
+                    .call()
+                    .content()
+                    .trim()
+                    .toLowerCase();
+        } finally {
+            MemoryAdvisor.clearConversationId();
+        }
+        return result;
+    }
+
+    public List<ShapeCommand> parseVoiceCommand(String userMessage, String conversationId) {
+        String rawResponse;
+        try {
+            MemoryAdvisor.setConversationId(conversationId);
+            rawResponse = chatClient.prompt()
+                    .user(userMessage)
+                    .advisors(commandAdvisor, memoryAdvisor)
+                    .call()
+                    .chatResponse()
+                    .getResult()
+                    .getOutput()
+                    .getText();
+        } finally {
+            MemoryAdvisor.clearConversationId();
+        }
 
         String json = extractJson(rawResponse);
         try {
@@ -50,18 +78,21 @@ public class AIService {
         }
     }
 
-    /**
-     * Phase 2: 将用户的自然语言指令转换为图表结构（流程图/思维导图/ER图/架构图）
-     */
-    public Diagram parseDiagramCommand(String userMessage) {
-        String rawResponse = chatClient.prompt()
-                .user(userMessage)
-                .advisors(diagramAdvisor)
-                .call()
-                .chatResponse()
-                .getResult()
-                .getOutput()
-                .getText();
+    public Diagram parseDiagramCommand(String userMessage, String conversationId) {
+        String rawResponse;
+        try {
+            MemoryAdvisor.setConversationId(conversationId);
+            rawResponse = chatClient.prompt()
+                    .user(userMessage)
+                    .advisors(memoryAdvisor, diagramAdvisor)
+                    .call()
+                    .chatResponse()
+                    .getResult()
+                    .getOutput()
+                    .getText();
+        } finally {
+            MemoryAdvisor.clearConversationId();
+        }
 
         String json = extractJson(rawResponse);
         try {
@@ -71,9 +102,6 @@ public class AIService {
         }
     }
 
-    /**
-     * 清洗模型返回文本，提取纯 JSON，处理可能的 ```json ... ``` 包裹
-     */
     private String extractJson(String text) {
         String trimmed = text.trim();
         if (trimmed.startsWith("```")) {

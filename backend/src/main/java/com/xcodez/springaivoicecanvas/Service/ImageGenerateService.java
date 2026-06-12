@@ -1,5 +1,6 @@
 package com.xcodez.springaivoicecanvas.Service;
 
+import com.xcodez.springaivoicecanvas.advisor.MemoryAdvisor;
 import com.xcodez.springaivoicecanvas.advisor.PromptEnhanceAdvisor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,6 +15,7 @@ public class ImageGenerateService {
 
     private final ChatClient chatClient;
     private final PromptEnhanceAdvisor enhanceAdvisor;
+    private final MemoryAdvisor memoryAdvisor;
     private final WebClient siliconFlowClient;
     private final String apiKey;
 
@@ -21,29 +23,30 @@ public class ImageGenerateService {
 
     public ImageGenerateService(ChatClient chatClient,
                                 PromptEnhanceAdvisor enhanceAdvisor,
+                                MemoryAdvisor memoryAdvisor,
                                 WebClient siliconFlowClient,
                                 @Value("${siliconflow.api-key}") String apiKey) {
         this.chatClient = chatClient;
         this.enhanceAdvisor = enhanceAdvisor;
+        this.memoryAdvisor = memoryAdvisor;
         this.siliconFlowClient = siliconFlowClient;
         this.apiKey = apiKey;
     }
 
-    /**
-     * 完整的图片生成流程：
-     * 1. DeepSeek 将用户中文描述扩写为高质量英文提示词
-     * 2. FLUX 根据提示词生成图片
-     */
-    public ImageResult generate(String userPrompt) {
-        // Step 1: 提示词扩写
-        String enhancedPrompt = chatClient.prompt()
-                .user(userPrompt)
-                .advisors(enhanceAdvisor)
-                .call()
-                .content()
-                .trim();
+    public ImageResult generate(String userPrompt, String conversationId) {
+        String enhancedPrompt;
+        try {
+            MemoryAdvisor.setConversationId(conversationId);
+            enhancedPrompt = chatClient.prompt()
+                    .user(userPrompt)
+                    .advisors(enhanceAdvisor, memoryAdvisor)
+                    .call()
+                    .content()
+                    .trim();
+        } finally {
+            MemoryAdvisor.clearConversationId();
+        }
 
-        // Step 2: 调用 FLUX 生成图片
         Map<String, Object> requestBody = Map.of(
                 "model", MODEL,
                 "prompt", enhancedPrompt

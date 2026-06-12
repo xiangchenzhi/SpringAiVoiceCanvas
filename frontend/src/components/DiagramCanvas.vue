@@ -98,19 +98,25 @@ function forceLayout(rawNodes, rawEdges, cw, ch) {
   sizes.forEach(s => { sizeMap[s.id] = s })
   const positions = {}
   const cx = cw / 2, cy = ch / 2
+  const count = sizes.length
+
+  // 初始散布半径 — 按节点数量+大小动态计算，确保不重叠
+  const avgW = sizes.reduce((s, n) => s + (n.width || 120), 0) / Math.max(count, 1)
+  const avgH = sizes.reduce((s, n) => s + (n.height || 80), 0) / Math.max(count, 1)
+  const spreadR = Math.max(Math.min(cw, ch) * 0.38, avgW * count * 0.25)
 
   sizes.forEach((s, i) => {
-    const angle = (i / sizes.length) * 2 * Math.PI
-    const r = 50 + Math.min(sizes.length * 15, 100)
-    positions[s.id] = { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) }
+    const angle = (i / count) * 2 * Math.PI
+    positions[s.id] = { x: cx + spreadR * Math.cos(angle), y: cy + spreadR * Math.sin(angle) }
   })
 
   const edgeSet = rawEdges.map(e => ({ source: e.source, target: e.target }))
-  const iterations = 100, PAD = 50
+  const iterations = 120, PAD = 60
 
   for (let iter = 0; iter < iterations; iter++) {
     const forces = {}
     rawNodes.forEach(n => { forces[n.id] = { fx: 0, fy: 0 } })
+    // 节点间排斥力
     for (let i = 0; i < rawNodes.length; i++) {
       for (let j = i + 1; j < rawNodes.length; j++) {
         const a = rawNodes[i].id, b = rawNodes[j].id
@@ -120,38 +126,42 @@ function forceLayout(rawNodes, rawEdges, cw, ch) {
         const dy = positions[a].y - positions[b].y
         const dist = Math.sqrt(dx * dx + dy * dy) || 1
         const minDist = Math.max(sa.width, sa.height) / 2 + Math.max(sb.width, sb.height) / 2 + PAD
-        const repForce = dist < minDist ? 5000 / (dist * dist + 50) : 10000 / (dist * dist)
+        // 距离越近排斥力越大
+        const repForce = dist < minDist ? 15000 / (dist * dist + 30) : 12000 / (dist * dist)
         forces[a].fx += (dx / dist) * repForce
         forces[a].fy += (dy / dist) * repForce
         forces[b].fx -= (dx / dist) * repForce
         forces[b].fy -= (dy / dist) * repForce
       }
     }
+    // 边引力
     edgeSet.forEach(({ source, target }) => {
       if (!positions[source] || !positions[target]) return
       const dx = positions[target].x - positions[source].x
       const dy = positions[target].y - positions[source].y
       const dist = Math.sqrt(dx * dx + dy * dy) || 1
       const sa = sizeMap[source], sb = sizeMap[target]
-      const ideal = Math.max(sa?.width || 80, sb?.width || 80) + 120
-      const attForce = (dist - ideal) * 0.04
+      const ideal = Math.max(sa?.width || 80, sb?.width || 80) + 140
+      const attForce = (dist - ideal) * 0.03
       forces[source].fx += (dx / dist) * attForce
       forces[source].fy += (dy / dist) * attForce
       forces[target].fx -= (dx / dist) * attForce
       forces[target].fy -= (dy / dist) * attForce
     })
+    // 中心引力
     rawNodes.forEach(n => {
-      forces[n.id].fx += (cx - positions[n.id].x) * 0.001
-      forces[n.id].fy += (cy - positions[n.id].y) * 0.001
+      forces[n.id].fx += (cx - positions[n.id].x) * 0.0008
+      forces[n.id].fy += (cy - positions[n.id].y) * 0.0008
     })
-    const damp = 0.88 * (1 - iter / iterations * 0.5)
+    // 阻尼
+    const damp = 0.85 * (1 - iter / iterations * 0.45)
     rawNodes.forEach(n => {
       const s = sizeMap[n.id]
       if (!s) return
       positions[n.id].x += forces[n.id].fx * damp
       positions[n.id].y += forces[n.id].fy * damp
-      positions[n.id].x = Math.max(s.width / 2 + 10, Math.min(cw - s.width / 2 - 10, positions[n.id].x))
-      positions[n.id].y = Math.max(s.height / 2 + 10, Math.min(ch - s.height / 2 - 10, positions[n.id].y))
+      positions[n.id].x = Math.max(s.width / 2 + 20, Math.min(cw - s.width / 2 - 20, positions[n.id].x))
+      positions[n.id].y = Math.max(s.height / 2 + 20, Math.min(ch - s.height / 2 - 20, positions[n.id].y))
     })
   }
   return positions

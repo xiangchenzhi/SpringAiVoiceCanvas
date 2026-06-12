@@ -17,7 +17,7 @@ public class DiagramController {
 
     @PostMapping("/diagram")
     public DiagramResponse handleDiagram(@RequestBody DiagramRequest request) {
-        Diagram diagram = aiService.parseDiagramCommand(request.getTranscript());
+        Diagram diagram = aiService.parseDiagramCommand(request.getTranscript(), "");
         return new DiagramResponse("diagram", diagram, request.getTranscript());
     }
 }

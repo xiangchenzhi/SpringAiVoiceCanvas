@@ -21,7 +21,7 @@ public class VoiceController {
 
     @PostMapping("/voice")
     public VoiceResponse handleVoice(@RequestBody VoiceRequest request) {
-        List<ShapeCommand> commands = aiService.parseVoiceCommand(request.getTranscript());
+        List<ShapeCommand> commands = aiService.parseVoiceCommand(request.getTranscript(), "");
         return new VoiceResponse(commands, request.getTranscript());
     }
 }

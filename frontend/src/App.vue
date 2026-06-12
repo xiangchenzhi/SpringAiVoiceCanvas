@@ -1,44 +1,41 @@
 <template>
   <div class="app-shell">
-    <!-- ========== 主画布区 (80%) ========== -->
+    <!-- ========== 侧边栏 ========== -->
+    <Sidebar
+      :conversations="conversationList"
+      :activeId="conversationId"
+      @select="loadConversation"
+      @new-conversation="newConversation"
+    />
+
+    <!-- ========== 主画布区 ========== -->
     <div class="canvas-area">
-      <!-- 顶栏 -->
       <div class="topbar">
         <h1 class="app-title">DiagramGPT</h1>
-        <div class="mode-tabs">
-          <button :class="['mode-btn', { active: mode === 'shape' }]" @click="switchMode('shape')">
-            <span class="mode-icon">✏️</span> 自由绘图
-          </button>
-          <button :class="['mode-btn', { active: mode === 'diagram' }]" @click="switchMode('diagram')">
-            <span class="mode-icon">📊</span> 图表生成
-          </button>
-          <button :class="['mode-btn', { active: mode === 'image' }]" @click="switchMode('image')">
-            <span class="mode-icon">🖼️</span> 图片生成
-          </button>
-        </div>
+        <span class="intent-badge" v-if="activeType">{{ labelForType(activeType) }}</span>
+        <span class="session-title" v-if="currentTitle">{{ currentTitle }}</span>
       </div>
 
-      <!-- 画布 -->
-      <DrawingCanvas v-if="mode === 'shape'" :shapes="shapes" />
-      <DiagramCanvas v-if="mode === 'diagram'" :diagram="diagram" />
-      <ImageCanvas v-if="mode === 'image'" :imageUrl="imageUrl" :loading="loading" :loadingStep="loadingStep" />
+      <DrawingCanvas v-if="activeType === 'shape'" :shapes="shapes" />
+      <DiagramCanvas v-if="activeType === 'diagram'" :diagram="diagram" />
+      <ImageCanvas v-if="activeType === 'image'" :imageUrl="imageUrl" :loading="loading" :loadingStep="loadingStep" />
+
+      <div v-if="!activeType && !loading" class="empty-canvas">
+        <div class="empty-icon">💬</div>
+        <p>描述你想要什么，AI 会帮你完成</p>
+        <p class="empty-hint">试试说：画一只赛博朋克猫 / 画一个请假审批流程 / 画一个蓝色圆形</p>
+      </div>
     </div>
 
-    <!-- ========== 右侧 AI 面板 (20%) ========== -->
+    <!-- ========== 右侧 AI 面板 ========== -->
     <div class="ai-panel">
-      <!-- AI 执行过程 -->
       <ProcessLog :entries="processLog" />
 
-      <!-- ChatGPT 风格输入区 -->
       <div class="chat-input-area">
         <textarea
           v-model="inputText"
           class="chat-textarea"
-          :placeholder="mode === 'shape'
-            ? '描述你想画的图形...'
-            : mode === 'diagram'
-              ? '描述你想要的图表...'
-              : '描述你想要的图片...'"
+          placeholder="描述你想要什么..."
           rows="3"
           @keydown.enter.exact="submitText"
           :disabled="loading"
@@ -56,16 +53,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, nextTick, onMounted } from 'vue'
 import DrawingCanvas from './components/DrawingCanvas.vue'
 import DiagramCanvas from './components/DiagramCanvas.vue'
 import ImageCanvas from './components/ImageCanvas.vue'
 import ProcessLog from './components/ProcessLog.vue'
-import { sendVoiceCommand } from './api/voiceApi.js'
-import { sendDiagramCommand } from './api/diagramApi.js'
-import { generateImage } from './api/imageApi.js'
+import Sidebar from './components/Sidebar.vue'
+import { sendIntent } from './api/intentApi.js'
+import { fetchConversations, fetchConversation } from './api/conversationApi.js'
 
-const mode = ref('shape')
+const activeType = ref('')
 const shapes = ref([])
 const diagram = ref(null)
 const imageUrl = ref('')
@@ -73,14 +70,14 @@ const loadingStep = ref('')
 const processLog = reactive([])
 const inputText = ref('')
 const loading = ref(false)
+const conversationId = ref('')
+const conversationList = ref([])
+const currentTitle = ref('')
 
-function switchMode(m) {
-  mode.value = m
-  diagram.value = null
-  shapes.value = []
-  imageUrl.value = ''
-  loadingStep.value = ''
-  processLog.length = 0
+onMounted(() => refreshConversationList())
+
+async function refreshConversationList() {
+  try { conversationList.value = await fetchConversations() } catch (e) { /* ignore */ }
 }
 
 function addLog(msg, type = 'info') {
@@ -90,42 +87,19 @@ function addLog(msg, type = 'info') {
 function executeCommand(cmd) {
   switch (cmd.action) {
     case 'circle':
-      shapes.value.push({
-        type: 'circle',
-        cx: cmd.params.cx ?? 500, cy: cmd.params.cy ?? 300,
-        r: cmd.params.r ?? 50, color: cmd.params.color ?? 'black'
-      })
+      shapes.value.push({ type: 'circle', cx: cmd.params.cx ?? 500, cy: cmd.params.cy ?? 300, r: cmd.params.r ?? 50, color: cmd.params.color ?? 'black' })
       break
     case 'rect':
-      shapes.value.push({
-        type: 'rect',
-        x: cmd.params.x ?? 450, y: cmd.params.y ?? 260,
-        width: cmd.params.width ?? 100, height: cmd.params.height ?? 80,
-        color: cmd.params.color ?? 'black'
-      })
+      shapes.value.push({ type: 'rect', x: cmd.params.x ?? 450, y: cmd.params.y ?? 260, width: cmd.params.width ?? 100, height: cmd.params.height ?? 80, color: cmd.params.color ?? 'black' })
       break
     case 'triangle':
-      shapes.value.push({
-        type: 'triangle',
-        cx: cmd.params.cx ?? 500, cy: cmd.params.cy ?? 300,
-        size: cmd.params.size ?? 60, color: cmd.params.color ?? 'black'
-      })
+      shapes.value.push({ type: 'triangle', cx: cmd.params.cx ?? 500, cy: cmd.params.cy ?? 300, size: cmd.params.size ?? 60, color: cmd.params.color ?? 'black' })
       break
     case 'line':
-      shapes.value.push({
-        type: 'line',
-        x1: cmd.params.x1 ?? 0, y1: cmd.params.y1 ?? 0,
-        x2: cmd.params.x2 ?? 100, y2: cmd.params.y2 ?? 100,
-        color: cmd.params.color ?? 'black'
-      })
+      shapes.value.push({ type: 'line', x1: cmd.params.x1 ?? 0, y1: cmd.params.y1 ?? 0, x2: cmd.params.x2 ?? 100, y2: cmd.params.y2 ?? 100, color: cmd.params.color ?? 'black' })
       break
     case 'text':
-      shapes.value.push({
-        type: 'text',
-        x: cmd.params.x ?? 500, y: cmd.params.y ?? 300,
-        content: cmd.params.content ?? '', color: cmd.params.color ?? 'black',
-        fontSize: cmd.params.fontSize ?? 24
-      })
+      shapes.value.push({ type: 'text', x: cmd.params.x ?? 500, y: cmd.params.y ?? 300, content: cmd.params.content ?? '', color: cmd.params.color ?? 'black', fontSize: cmd.params.fontSize ?? 24 })
       break
     case 'clear': shapes.value = []; break
     case 'undo': shapes.value.pop(); break
@@ -141,52 +115,59 @@ async function submitText() {
   processLog.length = 0
 
   try {
-    if (mode.value === 'shape') {
-      addLog('正在理解绘图指令...', 'info')
-      const data = await sendVoiceCommand(text)
+    addLog('正在理解你的意图...', 'info')
+    const data = await sendIntent(text, conversationId.value)
+
+    if (data.error) {
+      addLog(`错误: ${data.error}`, 'error')
+      return
+    }
+
+    // 服务器返回的 conversationId（新会话时生成）
+    if (data.conversationId) {
+      conversationId.value = data.conversationId
+      currentTitle.value = data.title || ''
+    }
+
+    const type = data.type
+    addLog(`识别意图: ${labelForType(type)}`, 'success')
+    activeType.value = type
+
+    if (type === 'shape') {
+      shapes.value = []
       const commands = data.commands || []
       addLog(`解析出 ${commands.length} 个绘图操作`, 'success')
-      commands.forEach((cmd, i) => {
+      commands.forEach(cmd => {
         executeCommand(cmd)
-        addLog(`${cmd.action}: ${JSON.stringify(cmd.params)}`, 'info')
+        addLog(`${cmd.action}`, 'info')
       })
       addLog('渲染完成', 'success')
-    } else if (mode.value === 'diagram') {
-      addLog('正在分析图表需求...', 'info')
-      const data = await sendDiagramCommand(text)
+    } else if (type === 'diagram') {
       const d = data.diagram
-      if (!d) {
-        addLog('未能解析出图表结构', 'error')
-        return
-      }
-      addLog(`识别为「${labelForType(d.type)}」`, 'success')
+      if (!d) { addLog('未能解析出图表结构', 'error'); return }
+      addLog(`图表类型: ${labelForDiagram(d.type)}`, 'success')
       const nodes = d.nodes || []
-      const edges = d.edges || []
       addLog(`提取 ${nodes.length} 个节点`, 'info')
       nodes.forEach(n => addLog(`  ${n.label}`, 'node'))
-      if (edges.length > 0) {
-        addLog(`构建 ${edges.length} 条关系`, 'info')
-      }
+      if ((d.edges || []).length > 0) addLog(`构建 ${d.edges.length} 条关系`, 'info')
       addLog('自动布局中...', 'info')
       diagram.value = d
       await nextTick()
-      addLog('渲染完成 ✓', 'success')
-    } else if (mode.value === 'image') {
+      addLog('渲染完成', 'success')
+    } else if (type === 'image') {
+      const enhanced = data.enhancedPrompt || ''
       addLog('正在优化提示词...', 'info')
       loadingStep.value = 'enhancing'
-      const data = await generateImage(text)
-
       addLog(`原始输入: ${text}`, 'info')
-      const enhanced = data.enhancedPrompt || ''
       addLog(`优化后提示词: ${enhanced}`, 'node')
-
       loadingStep.value = 'generating'
       addLog('正在生成图片...', 'info')
-
       imageUrl.value = data.imageUrl
       await nextTick()
-      addLog('图片生成完成 ✓', 'success')
+      addLog('图片生成完成', 'success')
     }
+
+    refreshConversationList()
   } catch (e) {
     console.error(e)
     addLog(`错误: ${e.message}`, 'error')
@@ -196,7 +177,51 @@ async function submitText() {
   }
 }
 
+function newConversation() {
+  conversationId.value = ''
+  currentTitle.value = ''
+  activeType.value = ''
+  shapes.value = []
+  diagram.value = null
+  imageUrl.value = ''
+  processLog.length = 0
+}
+
+async function loadConversation(id) {
+  try {
+    const c = await fetchConversation(id)
+    if (c.error) return
+    processLog.length = 0
+    conversationId.value = c.id
+    currentTitle.value = c.title || ''
+
+    if (!c.type) { activeType.value = ''; return }
+    activeType.value = c.type
+
+    if (c.type === 'image') {
+      imageUrl.value = c.lastImageUrl || ''
+    } else if (c.lastResult) {
+      try {
+        const data = JSON.parse(c.lastResult)
+        if (c.type === 'diagram') {
+          diagram.value = data
+        } else if (c.type === 'shape') {
+          shapes.value = []
+          data.forEach(cmd => executeCommand(cmd))
+        }
+      } catch (e) { /* ignore */ }
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
 function labelForType(t) {
+  const m = { shape: '自由绘图', diagram: '图表生成', image: 'AI 绘画' }
+  return m[t] || t
+}
+
+function labelForDiagram(t) {
   const m = { flowchart: '流程图', mindmap: '思维导图', er: 'ER 图', architecture: '架构图' }
   return m[t] || t
 }
@@ -211,136 +236,64 @@ body {
   min-height: 100vh;
   overflow: hidden;
 }
-
-/* ====== Shell ====== */
-.app-shell {
-  display: flex;
-  height: 100vh;
-  width: 100vw;
-}
-
-/* ====== 画布区 80% ====== */
+.app-shell { display: flex; height: 100vh; width: 100vw; }
 .canvas-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+  flex: 1; display: flex; flex-direction: column; min-width: 0;
 }
-
 .topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 24px;
-  border-bottom: 1px solid #1e293b;
-  background: #111827;
-  height: 56px;
-  flex-shrink: 0;
+  display: flex; align-items: center; padding: 12px 24px;
+  border-bottom: 1px solid #1e293b; background: #111827;
+  height: 56px; flex-shrink: 0; gap: 12px;
 }
 .app-title {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 22px; font-weight: 700;
   background: linear-gradient(135deg, #60a5fa, #a78bfa);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   letter-spacing: -0.5px;
 }
-.mode-tabs {
-  display: flex;
-  gap: 4px;
-  background: #1e293b;
-  border-radius: 10px;
-  padding: 3px;
+.intent-badge {
+  font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 6px;
+  background: #1e293b; color: #94a3b8;
 }
-.mode-btn {
-  padding: 6px 16px;
-  font-size: 13px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #94a3b8;
-  cursor: pointer;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  gap: 5px;
+.session-title {
+  font-size: 13px; color: #64748b; margin-left: 4px;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.mode-btn.active {
-  background: #334155;
-  color: #f1f5f9;
-  font-weight: 600;
+.empty-canvas {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; background: #f8fafc; color: #94a3b8; gap: 8px;
 }
-.mode-btn:hover:not(.active) { color: #cbd5e1; }
-.mode-icon { font-size: 14px; }
-
-/* ====== AI 面板 20% ====== */
+.empty-icon { font-size: 48px; }
+.empty-hint { font-size: 13px; max-width: 500px; text-align: center; line-height: 1.6; }
 .ai-panel {
-  width: 360px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid #1e293b;
-  background: #0f172a;
+  width: 300px; min-width: 300px; height: 100vh;
+  background: #1e293b; border-left: 1px solid #334155;
+  display: flex; flex-direction: column; overflow: hidden;
 }
-
-/* ChatGPT 风格输入 */
-.chat-input-area {
-  margin: 12px;
-  background: #1e293b;
-  border-radius: 14px;
-  border: 1px solid #334155;
-  transition: border-color 0.2s;
-  flex-shrink: 0;
-}
-.chat-input-area:focus-within {
-  border-color: #6366f1;
-}
+.chat-input-area { padding: 12px; border-top: 1px solid #334155; flex-shrink: 0; }
 .chat-textarea {
-  width: 100%;
-  padding: 12px 14px 4px;
-  border: none;
-  background: transparent;
-  color: #e2e8f0;
-  font-size: 14px;
-  font-family: inherit;
-  resize: none;
-  outline: none;
-  line-height: 1.5;
+  width: 100%; padding: 12px; border-radius: 10px;
+  border: 1px solid #475569; background: #0f172a; color: #e2e8f0;
+  font-size: 14px; resize: none; outline: none;
+  font-family: inherit; line-height: 1.5;
 }
+.chat-textarea:focus { border-color: #60a5fa; }
 .chat-textarea::placeholder { color: #64748b; }
-.chat-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 4px 12px 10px;
-  gap: 8px;
-}
-.char-hint {
-  font-size: 11px;
-  color: #475569;
-}
+.chat-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.char-hint { font-size: 11px; color: #64748b; }
 .send-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: none;
-  background: #6366f1;
-  color: #fff;
-  font-size: 14px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
+  width: 36px; height: 36px; border-radius: 50%; border: none;
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  color: #fff; font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.2s;
 }
-.send-btn:hover:not(:disabled) { background: #818cf8; }
-.send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.send-btn:hover:not(:disabled) { opacity: 0.85; }
 .spinner {
-  width: 14px; height: 14px;
-  border: 2px solid #fff;
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+  width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>

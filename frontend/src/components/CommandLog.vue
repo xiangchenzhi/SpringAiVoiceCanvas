@@ -9,15 +9,19 @@
       >
         <div class="log-header">
           <span class="log-time">{{ entry.time }}</span>
-          <span class="log-count">{{ entry.commands.length }} 条命令</span>
+          <span class="log-count" v-if="entry.commands">{{ entry.commands.length }} 条命令</span>
+          <span class="log-count" v-else-if="entry.diagramType">{{ entry.diagramType }} 图表</span>
         </div>
         <div class="log-text">"{{ entry.text }}"</div>
-        <div class="log-commands">
+        <div class="log-commands" v-if="entry.commands">
           <span
             v-for="(cmd, j) in entry.commands"
             :key="j"
             class="cmd-tag"
           >{{ cmd.action }}</span>
+        </div>
+        <div class="log-commands" v-else-if="entry.diagramType">
+          <span class="cmd-tag">{{ entry.diagramType }}</span>
         </div>
       </div>
     </div>

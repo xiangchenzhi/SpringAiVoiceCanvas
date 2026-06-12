@@ -229,9 +229,230 @@ const transcript = ref('')   // 识别文字
 
 ---
 
-## 七、后端 API 设计
+---
 
-### POST /api/voice
+## 七、Phase 2 — 结构化图表（AI 生成图结构）
+
+### 7.0 架构洞察：从「AI 画图」到「AI 生成图结构」
+
+| | Phase 1（自由绘图） | Phase 2（结构化图表） |
+|---|---|---|
+| LLM 职责 | 理解 + 布局 + 绘制 | **仅理解语义** |
+| 前端职责 | 照坐标渲染 | **布局引擎 + 渲染引擎** |
+| 坐标谁算 | 大模型猜 | 布局算法算 |
+| 为什么画房子丑 | 大模型不知道像素 | 布局引擎知道 |
+
+**核心思想：不要让 LLM 去做确定性算法的事。**
+
+```
+语音 → ASR → Spring AI → 结构化图模型 → 布局引擎 → SVG
+
+LLM 只负责：
+  - 节点有哪些
+  - 关系是什么
+```
+
+### 7.1 统一 DSL：Diagram
+
+四种图表类型在底层统一为 Graph 模型：
+
+```
+流程图(Graph) ⊃ 架构图(Graph) ⊃ ER图(Graph) ⊃ 思维导图(Tree ⊂ Graph)
+```
+
+**统一 Java 模型：**
+
+```java
+class Diagram {
+    String type;           // flowchart | mindmap | er | architecture
+    List<Node> nodes;
+    List<Edge> edges;
+}
+
+class Node {
+    String id;             // 唯一标识
+    String label;          // 显示文本
+    String nodeType;       // start / process / decision / end / entity / service / ...
+}
+
+class Edge {
+    String source;         // 源节点 id
+    String target;         // 目标节点 id
+    String label;          // 边标签（可选）
+}
+```
+
+### 7.2 四种图表类型
+
+#### 流程图（flowchart）
+
+用户："帮我画一个请假审批流程"
+
+```json
+{
+  "type": "flowchart",
+  "nodes": [
+    {"id": "start",   "label": "开始",     "nodeType": "start"},
+    {"id": "apply",   "label": "提交申请",   "nodeType": "process"},
+    {"id": "approve", "label": "审批",      "nodeType": "decision"},
+    {"id": "end",     "label": "结束",      "nodeType": "end"}
+  ],
+  "edges": [
+    {"source": "start",   "target": "apply"},
+    {"source": "apply",   "target": "approve"},
+    {"source": "approve", "target": "end",   "label": "通过"}
+  ]
+}
+```
+
+#### 思维导图（mindmap）
+
+用户："生成 SpringCloud 学习路线"
+
+```json
+{
+  "type": "mindmap",
+  "nodes": [
+    {"id": "root",      "label": "SpringCloud"},
+    {"id": "registry",  "label": "注册中心",    "nodeType": "branch"},
+    {"id": "nacos",     "label": "Nacos"},
+    {"id": "invoke",    "label": "服务调用",    "nodeType": "branch"},
+    {"id": "feign",     "label": "OpenFeign"}
+  ],
+  "edges": [
+    {"source": "root",     "target": "registry"},
+    {"source": "registry", "target": "nacos"},
+    {"source": "root",     "target": "invoke"},
+    {"source": "invoke",   "target": "feign"}
+  ]
+}
+```
+
+#### ER 图（er）
+
+用户："画一个电商系统 ER 图"
+
+```json
+{
+  "type": "er",
+  "nodes": [
+    {"id": "User",    "label": "User\n─────\nid\nname",    "nodeType": "entity"},
+    {"id": "Order",   "label": "Order\n─────\nid\nuser_id", "nodeType": "entity"}
+  ],
+  "edges": [
+    {"source": "User",  "target": "Order", "label": "1:N"}
+  ]
+}
+```
+
+#### 系统架构图（architecture）
+
+用户："画一个 SpringCloud 微服务架构"
+
+```json
+{
+  "type": "architecture",
+  "nodes": [
+    {"id": "gateway",   "label": "Gateway",       "nodeType": "service"},
+    {"id": "nacos",     "label": "Nacos",          "nodeType": "service"},
+    {"id": "orderSvc",  "label": "OrderService",   "nodeType": "service"},
+    {"id": "userSvc",   "label": "UserService",    "nodeType": "service"},
+    {"id": "mysql",     "label": "MySQL",           "nodeType": "database"},
+    {"id": "redis",     "label": "Redis",           "nodeType": "cache"}
+  ],
+  "edges": [
+    {"source": "gateway",  "target": "orderSvc"},
+    {"source": "gateway",  "target": "userSvc"},
+    {"source": "orderSvc", "target": "mysql"},
+    {"source": "orderSvc", "target": "redis"}
+  ]
+}
+```
+
+### 7.3 Prompt 设计
+
+```
+你是一个图表结构生成器。用户会用中文描述他们想要的图表（流程图、思维导图、ER 图、架构图）。
+你需要返回图的结构（nodes + edges），不要计算任何坐标或布局。
+
+规则：
+1. 根据用户描述判断图表类型：flowchart / mindmap / er / architecture
+2. 每个节点需有唯一 id 和描述性 label
+3. 流程图节点需标注 nodeType：start / process / decision / end
+4. ER 图节点为实体，需在 label 中包含字段列表
+5. 架构图节点需标注 nodeType：service / database / cache / gateway
+6. 只返回 JSON，不要任何其他文字
+
+返回格式：
+{
+  "type": "flowchart",
+  "nodes": [
+    {"id": "start", "label": "开始", "nodeType": "start"}
+  ],
+  "edges": [
+    {"source": "start", "target": "next", "label": "可选标签"}
+  ]
+}
+```
+
+### 7.4 前端渲染方案
+
+前端使用**自动布局算法**，不依赖 LLM 计算坐标：
+
+```
+Diagram(JSON)
+  ↓
+前端自动布局（按 type 选择布局策略）
+  ↓
+SVG 渲染
+```
+
+**布局策略：**
+
+| 图表类型 | 布局策略 |
+|---|---|
+| flowchart | 纵向分层布局（layered top-down） |
+| mindmap | 径向树布局（radial tree） |
+| er | 网格布局（grid） |
+| architecture | 力导向布局（force-directed） |
+
+**组件树更新：**
+
+```
+App.vue
+├── TextInput.vue            # 文字输入框（自由绘图 + 图表共用）
+├── DrawingCanvas.vue        # Phase 1 自由绘图 SVG 渲染
+├── DiagramCanvas.vue        # Phase 2 结构化图表 SVG 渲染（新增）
+│   └── 内置布局算法（layered / radial / grid / force）
+└── CommandLog.vue           # 命令历史日志
+```
+
+### 7.5 意图路由
+
+前端根据后端返回的响应类型自动切换渲染模式：
+
+```
+后端响应:
+  { commands: [...] }        → DrawingCanvas（自由绘图模式）
+  { diagram: {...} }         → DiagramCanvas（图表模式）
+```
+
+或者统一响应格式（推荐）：
+
+```json
+{
+  "type": "shape" | "diagram",
+  "commands": [...],        // type=shape 时有值
+  "diagram": {...},         // type=diagram 时有值
+  "originalText": "..."
+}
+```
+
+---
+
+## 八、后端 API 设计
+
+### POST /api/voice（Phase 1 — 自由绘图）
 
 **Request:**
 ```json
@@ -260,13 +481,44 @@ const transcript = ref('')   // 识别文字
 }
 ```
 
+### POST /api/diagram（Phase 2 — 结构化图表）
+
+**Request:**
+```json
+{
+  "transcript": "帮我画一个请假审批流程"
+}
+```
+
+**Response:**
+```json
+{
+  "type": "diagram",
+  "diagram": {
+    "type": "flowchart",
+    "nodes": [
+      {"id": "start", "label": "开始", "nodeType": "start"},
+      {"id": "apply", "label": "提交申请", "nodeType": "process"},
+      {"id": "approve", "label": "审批", "nodeType": "decision"},
+      {"id": "end", "label": "结束", "nodeType": "end"}
+    ],
+    "edges": [
+      {"source": "start", "target": "apply"},
+      {"source": "apply", "target": "approve"},
+      {"source": "approve", "target": "end", "label": "通过"}
+    ]
+  },
+  "originalText": "帮我画一个请假审批流程"
+}
+```
+
 ### GET /api/health
 
 健康检查接口。
 
 ---
 
-## 八、项目结构
+## 九、项目结构
 
 ```
 SpringAIVoiceCanvas/                  # Git 仓库根目录（monorepo）
@@ -276,71 +528,75 @@ SpringAIVoiceCanvas/                  # Git 仓库根目录（monorepo）
 ├── .gitattributes
 ├── backend/                          # Spring Boot 后端模块
 │   ├── pom.xml
-│   ├── mvnw / mvnw.cmd
-│   ├── HELP.md
+│   └── src/main/java/.../
+│       ├── SpringAiVoiceCanvasApplication.java
+│       ├── config/
+│       │   └── AIConfig.java         # ChatClient Bean
+│       ├── advisor/
+│       │   ├── DrawingCommandAdvisor.java   # Phase 1: 自由绘图 System Prompt
+│       │   └── DiagramAdvisor.java          # Phase 2: 图表结构 System Prompt
+│       ├── controller/
+│       │   ├── VoiceController.java         # POST /api/voice  (Phase 1)
+│       │   └── DiagramController.java       # POST /api/diagram (Phase 2)
+│       ├── Service/
+│       │   └── AIService.java               # ChatClient 调用 + JSON 解析
+│       └── model/
+│           ├── ShapeCommand.java            # Phase 1 命令 DTO
+│           ├── VoiceRequest.java            # Phase 1 请求 DTO
+│           ├── VoiceResponse.java           # Phase 1 响应 DTO
+│           ├── DiagramNode.java             # Phase 2 节点
+│           ├── DiagramEdge.java             # Phase 2 边
+│           ├── Diagram.java                 # Phase 2 图结构
+│           ├── DiagramRequest.java          # Phase 2 请求 DTO
+│           └── DiagramResponse.java         # Phase 2 响应 DTO
+├── frontend/                         # Vue 3 + Vite 前端模块
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.js
 │   └── src/
-│       ├── main/
-│       │   ├── java/com/xcodez/springaivoicecanvas/
-│       │   │   ├── SpringAiVoiceCanvasApplication.java
-│       │   │   ├── Service/
-│       │   │   │   └── AIService.java
-│       │   │   ├── config/
-│       │   │   │   └── AIConfig.java
-│       │   │   ├── controller/       # 待添加
-│       │   │   │   └── VoiceController.java
-│       │   │   ├── service/          # 待添加
-│       │   │   │   └── VoiceService.java
-│       │   │   └── model/            # 待添加
-│       │   │       ├── VoiceRequest.java
-│       │   │       ├── VoiceResponse.java
-│       │   │       └── ShapeCommand.java
-│       │   └── resources/
-│       │       └── application.properties
-│       └── test/
-└── frontend/                         # Vue 3 + Vite 前端模块
-    ├── index.html
-    ├── package.json
-    ├── vite.config.js
-    └── src/
-        ├── App.vue
-        ├── main.js
-        ├── components/
-        │   ├── VoiceButton.vue
-        │   ├── DrawingCanvas.vue
-        │   └── CommandLog.vue
-        └── api/
-            └── voiceApi.js
+│       ├── App.vue                   # 双模式入口（自由绘图 + 图表）
+│       ├── main.js
+│       ├── api/
+│       │   ├── voiceApi.js           # POST /api/voice
+│       │   └── diagramApi.js         # POST /api/diagram
+│       └── components/
+│           ├── DrawingCanvas.vue     # Phase 1: SVG 自由绘图渲染
+│           ├── DiagramCanvas.vue     # Phase 2: SVG 图表渲染（内置布局引擎）
+│           └── CommandLog.vue        # 命令历史日志
 ```
 
 ---
 
-## 九、推进计划
+## 十、推进计划
 
-| 阶段 | 内容 | 产出 |
-|---|---|---|
-| **Phase 1** | 后端核心：Spring AI 集成、VoiceController、基础 Prompt | 单条基础指令可解析执行 |
-| **Phase 2** | 前端核心：Vue 3 + SVG 渲染、Web Speech 集成 | 语音输入 → 图形渲染全链路 |
-| **Phase 3** | 复杂指令：数组命令、连续执行、相对定位 | 多条指令拆解执行 |
-| **Phase 4** | 完善：撤销重做、清空、错误处理、中文优化 | 交互闭环 |
-| **Phase 5** | 选做：修改属性、渐变、导出、预设模板 | 锦上添花 |
+| 阶段 | 内容 | 产出 | 状态 |
+|---|---|---|---|
+| **Phase 1** | 后端核心 + 自由绘图 | VoiceController + DrawingCommandAdvisor + SVG 渲染 | 已完成 |
+| **Phase 2** | 结构化图表 | DiagramController + DiagramAdvisor + DiagramCanvas（内置布局引擎） | 进行中 |
+| **Phase 3** | 语音输入 | Web Speech API 集成，替代文字输入框 | 待开始 |
+| **Phase 4** | 复杂指令 | 意图路由：自动判断自由绘图 vs 图表，统一入口 | 待开始 |
+| **Phase 5** | 选做 | 修改属性、渐变、导出、预设模板 | 待开始 |
 
 ---
 
-## 十、关键设计决策
+## 十一、关键设计决策
 
 1. **为什么用 SVG 而不是 Canvas？**
    SVG 的每个图形都是独立 DOM 元素，天然支持 Vue 响应式渲染和撤销重做，符合"形状即对象"的理念。
 
 2. **为什么命令用数组而不是单个对象？**
-   题目明确要求"复杂指令拆解能力"。一次语音可能对应多个绘图操作（如"画笑脸"→ 4个命令）。数组格式优雅地解决了这个问题。
+   题目明确要求"复杂指令拆解能力"。一次语音可能对应多个绘图操作。数组格式优雅地解决了这个问题。
 
-3. **为什么位置用绝对坐标而不是相对坐标？**
+3. **Phase 1：为什么位置用绝对坐标而不是相对坐标？**
    让大模型根据画布尺寸计算绝对坐标，前端只需执行。避免前端维护复杂的相对定位逻辑。
 
-4. **Spring AI 的定位？**
-   Spring AI 只负责"自然语言 → 结构化命令"这一步，不碰语音也不碰渲染。职责清晰，边界明确。
+4. **Phase 2：为什么 LLM 不负责算坐标？**
+   核心架构洞察：LLM 是「图结构生成器」而非「绘图引擎」。让 LLM 只输出 nodes + edges，前端用布局算法算坐标，生成质量大幅提升。流程图/ER图/架构图/思维导图在底层统一为 Graph + Tree 模型。
 
-5. **语音识别为什么不用后端？**
+5. **Spring AI 的定位？**
+   Spring AI 只负责"自然语言 → 结构化命令/图结构"这一步，不碰语音也不碰渲染。职责清晰，边界明确。
+
+6. **语音识别为什么不用后端？**
    浏览器原生 Web Speech API 延迟最低（本地识别），无需上传音频流。中文识别准确率足够。
 
 ---

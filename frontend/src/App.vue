@@ -12,6 +12,9 @@
     <div class="canvas-area">
       <div class="topbar">
         <h1 class="app-title">DiagramGPT</h1>
+        <span class="voice-indicator" v-if="voiceSupported" :class="'voice-' + voiceState.toLowerCase()">
+          {{ voiceState === 'LISTENING' ? '🎤 正在监听' : voiceState === 'PROCESSING' ? '⏳ AI处理中' : '⏸ 已暂停监听' }}
+        </span>
         <span class="intent-badge" v-if="activeType">{{ labelForType(activeType) }}</span>
         <span class="session-title" v-if="currentTitle">{{ currentTitle }}</span>
         <span v-if="parentVersionId" class="branch-badge">分支模式</span>
@@ -62,12 +65,22 @@
           :disabled="loading"
         ></textarea>
         <div class="chat-actions">
+          <button
+            class="voice-btn"
+            :class="{ listening: voiceState === 'LISTENING' }"
+            @click="toggleVoice"
+            :disabled="loading || !voiceSupported || voiceState === 'PROCESSING'"
+            :title="voiceSupported ? '语音输入' : '浏览器不支持语音识别'"
+          >
+            {{ voiceState === 'LISTENING' ? '🎙️' : '🎤' }}
+          </button>
           <span class="char-hint">Enter 发送</span>
           <button class="send-btn" @click="submitText" :disabled="loading || !inputText.trim()">
             <span v-if="loading" class="spinner"></span>
             <span v-else>➤</span>
           </button>
         </div>
+        <div v-if="voiceState === 'LISTENING' && voiceText" class="voice-text">识别：{{ voiceText }}</div>
       </div>
     </div>
 
@@ -85,13 +98,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, onMounted } from 'vue'
+import { ref, reactive, nextTick, onMounted, watch } from 'vue'
 import DrawingCanvas from './components/DrawingCanvas.vue'
 import DiagramCanvas from './components/DiagramCanvas.vue'
 import ImageCanvas from './components/ImageCanvas.vue'
 import ProcessLog from './components/ProcessLog.vue'
 import Sidebar from './components/Sidebar.vue'
 import VersionTree from './components/VersionTree.vue'
+import { XunfeiAsrClient } from './api/xunfeiAsrClient.js'
 import { sendIntent } from './api/intentApi.js'
 import { fetchConversations, fetchConversation, fetchVersionTree, fetchVersionDetail, switchVersion } from './api/conversationApi.js'
 
@@ -112,7 +126,65 @@ const versionTree = ref([])
 const selectedVersionId = ref('')
 const showVersionPopover = ref(false)
 
-onMounted(() => refreshConversationList())
+// ====== 语音状态机（讯飞 ASR） ======
+const voiceSupported = ref(true)
+const VoiceState = { LISTENING: 'LISTENING', PROCESSING: 'PROCESSING', PAUSED: 'PAUSED' }
+const voiceState = ref(VoiceState.PAUSED)
+const voiceText = ref('')
+let asr = null
+
+function createAsr() {
+  asr = new XunfeiAsrClient({
+    onInterim: (text) => { voiceText.value = text },
+    onFinal: (text) => {
+      inputText.value = text
+      submitText()
+    },
+    onError: (msg) => {
+      console.error('讯飞 ASR:', msg)
+      voiceState.value = VoiceState.PAUSED
+    },
+    onStateChange: (s) => {
+      if (s === 'listening') voiceState.value = VoiceState.LISTENING
+      else if (s === 'processing') voiceState.value = VoiceState.PROCESSING
+      else voiceState.value = VoiceState.PAUSED
+    }
+  })
+}
+
+function toggleVoice() {
+  if (voiceState.value === VoiceState.PROCESSING) return
+  if (voiceState.value === VoiceState.LISTENING) {
+    pauseVoice()
+  } else if (voiceState.value === VoiceState.PAUSED) {
+    resumeVoice()
+  }
+}
+
+function startVoice() {
+  if (!asr) createAsr()
+  asr.start()
+}
+
+function pauseVoice() {
+  if (asr) asr.pause()
+  voiceText.value = ''
+}
+
+function resumeVoice() {
+  if (asr && !loading.value) asr.resume()
+}
+
+// 版本树弹窗 → 暂停/恢复
+watch(showVersionPopover, (val) => {
+  if (val) pauseVoice()
+  else resumeVoice()
+})
+
+onMounted(() => {
+  refreshConversationList()
+  startVoice()
+})
 
 async function refreshConversationList() {
   try { conversationList.value = await fetchConversations() } catch (e) { /* ignore */ }
@@ -151,6 +223,13 @@ async function submitText() {
   loading.value = true
   inputText.value = ''
   processLog.length = 0
+
+  // 语音触发(PROCESSING)或手动输入(LISTENING)：暂停监听，AI完成后恢复
+  const wasVoiceTriggered = voiceState.value === VoiceState.LISTENING || voiceState.value === VoiceState.PROCESSING
+  if (wasVoiceTriggered) {
+    pauseVoice()  // 必须设 asr._state='paused'，否则 finally 里 resume 不生效
+    voiceState.value = VoiceState.PROCESSING
+  }
 
   try {
     addLog('正在理解你的意图...', 'info')
@@ -209,10 +288,15 @@ async function submitText() {
   } finally {
     loading.value = false
     loadingStep.value = ''
+    // AI 处理完成 → 恢复监听
+    if (wasVoiceTriggered) {
+      resumeVoice()
+    }
   }
 }
 
 function newConversation() {
+  pauseVoice()
   conversationId.value = ''
   currentTitle.value = ''
   currentVersionId.value = ''
@@ -224,9 +308,11 @@ function newConversation() {
   parentVersionId.value = ''
   versionTree.value = []
   selectedVersionId.value = ''
+  resumeVoice()
 }
 
 async function loadConversation(id) {
+  pauseVoice()
   try {
     const c = await fetchConversation(id)
     if (c.error) return
@@ -265,6 +351,8 @@ async function loadConversation(id) {
     refreshVersionTree()
   } catch (e) {
     console.error(e)
+  } finally {
+    resumeVoice()
   }
 }
 
@@ -276,6 +364,7 @@ async function refreshVersionTree() {
 }
 
 async function selectVersion(versionId) {
+  pauseVoice()
   selectedVersionId.value = versionId
   parentVersionId.value = ''
   try {
@@ -307,6 +396,7 @@ async function selectVersion(versionId) {
     await refreshVersionTree()
     refreshConversationList()
   } catch (e) { /* ignore */ }
+  resumeVoice()
 }
 
 async function continueFromVersion(versionId) {
@@ -342,8 +432,10 @@ function onContinueFromVersion(versionId) {
 }
 
 function cancelBranch() {
+  pauseVoice()
   parentVersionId.value = ''
   selectedVersionId.value = ''
+  resumeVoice()
 }
 
 function labelForType(t) {
@@ -377,6 +469,13 @@ body {
   -webkit-text-fill-color: transparent;
   letter-spacing: -0.5px;
 }
+.voice-indicator {
+  font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 6px;
+  white-space: nowrap;
+}
+.voice-listening { background: #22c55e22; color: #22c55e; border: 1px solid #22c55e44; }
+.voice-processing { background: #f59e0b22; color: #f59e0b; border: 1px solid #f59e0b44; }
+.voice-paused { background: #64748b22; color: #64748b; border: 1px solid #64748b44; }
 .intent-badge {
   font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 6px;
   background: #1e293b; color: #94a3b8;
@@ -450,6 +549,18 @@ body {
 }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .send-btn:hover:not(:disabled) { opacity: 0.85; }
+.voice-btn {
+  width: 36px; height: 36px; border-radius: 50%; border: 1px solid #475569;
+  background: #1e293b; color: #e2e8f0; font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s;
+}
+.voice-btn:hover:not(:disabled) { border-color: #60a5fa; color: #60a5fa; }
+.voice-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.voice-btn.listening { background: #e94560; border-color: #e94560; animation: pulse 1.2s infinite; }
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+.voice-hint { font-size: 12px; color: #f59e0b; margin-top: 6px; }
+.voice-text { font-size: 12px; color: #60a5fa; margin-top: 4px; }
 .spinner {
   width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
   border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite;

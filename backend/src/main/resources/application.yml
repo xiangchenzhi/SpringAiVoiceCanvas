@@ -2,7 +2,7 @@ spring:
   ai:
     openai:
       base-url: https://api.deepseek.com
-      api-key: sk-dac701e5c71c4907b0c5fa8a6ecfca37
+      api-key: ${DEEPSEEK_API_KEY}
       chat:
         options:
           model: deepseek-chat
@@ -24,9 +24,14 @@ spring:
       port: 6379
       timeout: 3000ms
 siliconflow:
-  api-key: sk-tpbgmnzouqwinswmpovtmyzdyxgapekrkfxjwcrmxatxmilp
+  api-key: ${SILICONFLOW_API_KEY}
   image-url: https://api.siliconflow.cn/v1/images/generations
 
 chat:
   memory:
     max-rounds: 5
+
+xunfei:
+  app-id: ${XF_APP_ID:}
+  api-key: ${XF_API_KEY:}
+  api-secret: ${XF_API_SECRET:}

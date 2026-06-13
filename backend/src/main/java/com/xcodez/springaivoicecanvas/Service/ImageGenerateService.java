@@ -1,14 +1,15 @@
 package com.xcodez.springaivoicecanvas.Service;
 
-import com.xcodez.springaivoicecanvas.advisor.MemoryAdvisor;
-import com.xcodez.springaivoicecanvas.advisor.PromptEnhanceAdvisor;
+import java.util.List;
+import java.util.Map;
+
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.util.List;
-import java.util.Map;
+import com.xcodez.springaivoicecanvas.advisor.MemoryAdvisor;
+import com.xcodez.springaivoicecanvas.advisor.PromptEnhanceAdvisor;
 
 @Service
 public class ImageGenerateService {

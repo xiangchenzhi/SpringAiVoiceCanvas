@@ -9,7 +9,7 @@
 
       <div
         class="node-card"
-        :class="{ active: isActive, selected: isSelected }"
+        :class="{ active: isActive, selected: isSelected, branching: isBranchingFrom }"
         @click="$emit('select', node.id)"
       >
         <div class="node-main">
@@ -24,10 +24,11 @@
 
         <div class="node-actions">
           <span v-if="isActive" class="current-badge">当前</span>
+          <span v-else-if="isBranchingFrom" class="branch-badge-active">分支中</span>
           <button
             v-else
             class="continue-btn"
-            @click.stop="$emit('continue', node.id)"
+            @click="onContinue"
           >
             从此继续
           </button>
@@ -42,6 +43,7 @@
         :node="child"
         :active-id="activeId"
         :selected-id="selectedId"
+        :parent-version-id="parentVersionId"
         :is-root="false"
         :is-last="index === orderedChildren.length - 1"
         @select="$emit('select', $event)"
@@ -59,14 +61,21 @@ const props = defineProps({
   node: { type: Object, required: true },
   activeId: { type: String, default: '' },
   selectedId: { type: String, default: '' },
+  parentVersionId: { type: String, default: '' },
   isRoot: { type: Boolean, default: false },
   isLast: { type: Boolean, default: false }
 })
 
-defineEmits(['select', 'continue'])
+const emit = defineEmits(['select', 'continue'])
 
-const isActive = computed(() => props.activeId === props.node.id)
-const isSelected = computed(() => props.selectedId === props.node.id)
+function onContinue(e) {
+  e.stopPropagation()
+  emit('continue', props.node.id)
+}
+
+const isActive = computed(() => String(props.activeId) === String(props.node.id))
+const isSelected = computed(() => String(props.selectedId) === String(props.node.id))
+const isBranchingFrom = computed(() => String(props.parentVersionId) === String(props.node.id))
 const hasChildren = computed(() => Array.isArray(props.node.children) && props.node.children.length > 0)
 const summaryText = computed(() => {
   const text = props.node.summary || props.node.command || '新版本'
@@ -76,8 +85,8 @@ const summaryText = computed(() => {
 function subtreeScore(node, activeId, selectedId) {
   if (!node) return 0
   let score = 0
-  if (node.id === activeId) score = Math.max(score, 3)
-  if (node.id === selectedId) score = Math.max(score, 2)
+  if (String(node.id) === String(activeId)) score = Math.max(score, 3)
+  if (String(node.id) === String(selectedId)) score = Math.max(score, 2)
   const children = Array.isArray(node.children) ? node.children : []
   for (const child of children) {
     score = Math.max(score, subtreeScore(child, activeId, selectedId))
@@ -194,6 +203,11 @@ const orderedChildren = computed(() => {
   box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25);
 }
 
+.node-card.branching {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
 .node-main {
   min-width: 0;
   flex: 1;
@@ -248,9 +262,7 @@ const orderedChildren = computed(() => {
   border-color: rgba(148, 163, 184, 0.12);
 }
 
-.node-actions {
-  flex-shrink: 0;
-}
+.node-actions { flex-shrink: 0; position: relative; z-index: 1; }
 
 .current-badge {
   font-size: 11px;
@@ -258,6 +270,16 @@ const orderedChildren = computed(() => {
   color: #60a5fa;
   background: rgba(96, 165, 250, 0.12);
   border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 999px;
+  padding: 5px 10px;
+}
+
+.branch-badge-active {
+  font-size: 11px;
+  font-weight: 600;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.22);
   border-radius: 999px;
   padding: 5px 10px;
 }

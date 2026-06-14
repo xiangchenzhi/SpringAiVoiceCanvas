@@ -22,6 +22,7 @@
                 :node="root"
                 :active-id="activeId"
                 :selected-id="selectedId"
+                :parent-version-id="parentVersionId"
                 :is-root="true"
                 :is-last="index === tree.length - 1"
                 @select="$emit('select-node', $event)"
@@ -43,7 +44,8 @@ const props = defineProps({
   visible: Boolean,
   tree: { type: Array, default: () => [] },
   activeId: { type: String, default: '' },
-  selectedId: { type: String, default: '' }
+  selectedId: { type: String, default: '' },
+  parentVersionId: { type: String, default: '' }
 })
 
 defineEmits(['close', 'select-node', 'continue-from'])

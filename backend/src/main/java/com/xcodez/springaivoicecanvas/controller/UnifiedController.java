@@ -12,6 +12,7 @@ import com.xcodez.springaivoicecanvas.model.DiagramVersion;
 import com.xcodez.springaivoicecanvas.model.ShapeCommand;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -253,6 +254,12 @@ public class UnifiedController {
     @GetMapping("/versions/{conversationId}/tree")
     public List<Map<String, Object>> getVersionTree(@PathVariable String conversationId) {
         return versionService.getVersionTree(conversationId);
+    }
+
+    @DeleteMapping("/conversations/{id}")
+    public ResponseEntity<Map<String, String>> deleteConversation(@PathVariable String id) {
+        conversationService.delete(id);
+        return ResponseEntity.ok(Map.of("message", "删除成功"));
     }
 
     @GetMapping("/versions/{versionId}")

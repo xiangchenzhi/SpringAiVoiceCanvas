@@ -20,6 +20,13 @@
           <div class="item-title">{{ c.title || '未命名会话' }}</div>
           <div class="item-meta">{{ labelForType(c.conversationType) }} · {{ timeAgo(c.updatedAt) }}</div>
         </div>
+        <button
+          class="item-delete"
+          title="删除会话"
+          @click.stop="$emit('delete', c.id)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
       </div>
       <div v-if="conversations.length === 0" class="sidebar-empty">
         暂无历史会话
@@ -34,7 +41,7 @@ defineProps({
   activeId: { type: String, default: '' }
 })
 
-defineEmits(['select', 'new-conversation'])
+defineEmits(['select', 'new-conversation', 'delete'])
 
 function labelForType(t) {
   const m = { DIAGRAM: '图表生成', IMAGE: 'AI 绘画' }
@@ -94,6 +101,15 @@ function timeAgo(ts) {
 .item-body { flex: 1; min-width: 0; }
 .item-title { font-size: 13px; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item-meta { font-size: 11px; color: #64748b; margin-top: 2px; }
+.item-delete {
+  flex-shrink: 0; width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 6px;
+  background: transparent; color: #475569; cursor: pointer;
+  opacity: 0; transition: all 0.15s;
+}
+.sidebar-item:hover .item-delete { opacity: 1; }
+.item-delete:hover { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 .sidebar-empty { text-align: center; color: #475569; font-size: 13px; padding: 24px 0; }
 
 /* ---- 滚动条 ---- */

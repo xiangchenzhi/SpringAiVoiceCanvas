@@ -45,11 +45,26 @@ export class XunfeiAsrClient {
   // ========== 启动 ==========
 
   async start() {
+    // 如果正在监听，直接返回
     if (this._state === 'listening') return
 
-    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+    // 先设 listening 抢占状态，避免 async 空隙中被重复调用
+    this._setState('listening')
+
+    // ★ 核心修复：永远创建新 WS，不复用旧的。
+    //    旧的可能已被后端关闭（close 信号还在网络上），复用就是定时炸弹。
+    this._closeWS()
+
+    try {
       await this._connectWS()
+    } catch (e) {
+      this._onError('连接失败，请检查后台服务是否启动')
+      this._setState('paused')
+      return
     }
+
+    // 连接期间用户可能手动暂停了
+    if (this._state !== 'listening') return
 
     // 首次：获取麦克风 + 创建 AudioContext（只做一次）
     if (!this._stream) {
@@ -71,6 +86,26 @@ export class XunfeiAsrClient {
       this._analyser.fftSize = 256
       this._srcNode.connect(this._analyser)
       this._ratio = XunfeiAsrClient.TARGET_SAMPLE_RATE / this._audioCtx.sampleRate
+    }
+
+    // ★ 关键：AudioContext 闲置一段时间后浏览器会自动挂起
+    //    suspended 状态下 ScriptProcessorNode 的 onaudioprocess 不触发
+    //    resume() 在非用户手势上下文中可能静默失败
+    if (this._audioCtx.state !== 'running') {
+      console.log('[ASR] AudioContext state:', this._audioCtx.state, '尝试恢复...')
+      try { await this._audioCtx.resume() } catch (e) { /* ignore */ }
+      // 如果 resume 失败，重建 AudioContext（新 ctx 在异步回调中可能处于 running）
+      if (this._audioCtx.state !== 'running') {
+        console.warn('[ASR] AudioContext 无法恢复，重建中...')
+        this._audioCtx.close().catch(() => {})
+        this._audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 })
+        this._srcNode  = this._audioCtx.createMediaStreamSource(this._stream)
+        this._analyser = this._audioCtx.createAnalyser()
+        this._analyser.fftSize = 256
+        this._srcNode.connect(this._analyser)
+        this._ratio = XunfeiAsrClient.TARGET_SAMPLE_RATE / this._audioCtx.sampleRate
+        console.log('[ASR] 新 AudioContext state:', this._audioCtx.state)
+      }
     }
 
     // 挂载 processor（可多次）
@@ -175,7 +210,7 @@ export class XunfeiAsrClient {
       } else if (msg.type === 'final') {
         this._onFinal(msg.text)
         this._pending = false
-        // 不自动 restart，等 App.vue 调 resume()
+        this._setState('paused')
       } else if (msg.type === 'error') {
         this._onError(msg.message || '识别错误')
         this._pending = false
@@ -190,25 +225,43 @@ export class XunfeiAsrClient {
       this._ws.binaryType = 'arraybuffer'
       this._ws.onopen    = () => resolve()
       this._ws.onmessage = (e) => this._onWSMessage(e)
-      this._ws.onerror   = () => this._onError('WebSocket 连接异常')
+      this._ws.onerror   = () => {
+        if (this._state === 'listening') this._onError('WebSocket 连接异常')
+      }
       this._ws.onclose   = () => {
-        if (this._state !== 'paused') { this._onError('WebSocket 断开'); this._setState('paused') }
+        if (this._state === 'listening') {
+          this._onError('WebSocket 断开')
+          this._setState('paused')
+        }
       }
     })
   }
 
   // ========== 暂停 / 恢复 / 停止 ==========
 
+  _closeWS() {
+    if (this._ws) {
+      this._ws.onopen = null
+      this._ws.onmessage = null
+      this._ws.onerror = null
+      this._ws.onclose = null
+      try { this._ws.close() } catch (e) { /* */ }
+      this._ws = null
+    }
+  }
+
   pause() {
     if (this._state === 'listening' || this._state === 'processing') {
       this._detachProcessor()
       this._pending = false
+      this._closeWS()
       this._setState('paused')
     }
   }
 
   resume() {
-    if (this._state === 'paused') this.start()
+    // processing 和 paused 都能恢复 —— processing 表示上次 VAD 结束后还没回到 paused
+    if (this._state === 'paused' || this._state === 'processing') this.start()
   }
 
   /** 完全销毁（页面卸载） */
@@ -216,7 +269,7 @@ export class XunfeiAsrClient {
     this._detachProcessor()
     if (this._audioCtx) { this._audioCtx.close().catch(() => {}); this._audioCtx = null; this._analyser = null; this._srcNode = null }
     if (this._stream)   { this._stream.getTracks().forEach(t => t.stop()); this._stream = null }
-    if (this._ws)        { this._ws.close(); this._ws = null }
+    this._closeWS()
     this._pending = false
     this._setState('paused')
   }

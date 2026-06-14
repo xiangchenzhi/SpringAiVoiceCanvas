@@ -1,14 +1,17 @@
 package com.xcodez.springaivoicecanvas.Service;
 
-import com.xcodez.springaivoicecanvas.model.Conversation;
-import com.xcodez.springaivoicecanvas.repository.ConversationRepository;
+import java.util.List;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import com.xcodez.springaivoicecanvas.model.Conversation;
+import com.xcodez.springaivoicecanvas.repository.ConversationRepository;
+import com.xcodez.springaivoicecanvas.repository.DiagramVersionRepository;
 
 @Service
 public class ConversationService {
@@ -16,10 +19,12 @@ public class ConversationService {
     private static final Logger log = LoggerFactory.getLogger(ConversationService.class);
 
     private final ConversationRepository repo;
+    private final DiagramVersionRepository versionRepo;
     private final ChatClient chatClient;
 
-    public ConversationService(ConversationRepository repo, ChatClient chatClient) {
+    public ConversationService(ConversationRepository repo, DiagramVersionRepository versionRepo, ChatClient chatClient) {
         this.repo = repo;
+        this.versionRepo = versionRepo;
         this.chatClient = chatClient;
     }
 
@@ -62,6 +67,11 @@ public class ConversationService {
             if (lastType != null) c.setLastType(lastType.substring(0, Math.min(lastType.length(), 48)));
             if (imageUrl != null) c.setLastImageUrl(imageUrl);
         });
+    }
+
+    public void delete(String conversationId) {
+        versionRepo.deleteByConversationId(conversationId);
+        repo.deleteById(conversationId);
     }
 
     /**

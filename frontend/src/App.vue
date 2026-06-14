@@ -7,6 +7,7 @@
       :activeId="conversationId"
       @select="loadConversation"
       @new-conversation="newConversation"
+      @delete="handleDeleteConversation"
     />
 
     <!-- ========== 主画布区 ========== -->
@@ -103,6 +104,7 @@
       :tree="versionTree"
       :activeId="currentVersionId"
       :selectedId="selectedVersionId"
+      :parentVersionId="parentVersionId"
       @close="showVersionPopover = false"
       @select-node="selectVersion"
       @continue-from="onContinueFromVersion"
@@ -122,7 +124,7 @@ import LoginView from './components/LoginView.vue'
 import { XunfeiAsrClient } from './api/xunfeiAsrClient.js'
 import { isLoggedIn } from './api/authApi.js'
 import { sendIntent } from './api/intentApi.js'
-import { fetchConversations, fetchConversation, fetchVersionTree, fetchVersionDetail, switchVersion } from './api/conversationApi.js'
+import { fetchConversations, fetchConversation, fetchVersionTree, fetchVersionDetail, switchVersion, deleteConversation } from './api/conversationApi.js'
 
 const activeType = ref('')
 const shapes = ref([])
@@ -168,9 +170,9 @@ function createAsr() {
       voiceState.value = VoiceState.PAUSED
     },
     onStateChange: (s) => {
-      if (s === 'listening') voiceState.value = VoiceState.LISTENING
-      else if (s === 'processing') voiceState.value = VoiceState.PROCESSING
-      else voiceState.value = VoiceState.PAUSED
+      // 只响应 processing 状态（VAD 结束发送时触发），
+      // LISTENING/PAUSED 由 App.vue 同步管理，避免覆盖
+      if (s === 'processing') voiceState.value = VoiceState.PROCESSING
     }
   })
 }
@@ -187,15 +189,19 @@ function toggleVoice() {
 function startVoice() {
   if (!asr) createAsr()
   asr.start()
+  voiceState.value = VoiceState.LISTENING
 }
 
 function pauseVoice() {
   if (asr) asr.pause()
   voiceText.value = ''
+  voiceState.value = VoiceState.PAUSED
 }
 
 function resumeVoice() {
-  if (asr && !loading.value) asr.resume()
+  if (!asr) return
+  voiceState.value = VoiceState.LISTENING
+  asr.resume()
 }
 
 // 版本树弹窗 → 暂停/恢复
@@ -259,8 +265,7 @@ async function submitText() {
   // 语音触发(PROCESSING)或手动输入(LISTENING)：暂停监听，AI完成后恢复
   const wasVoiceTriggered = voiceState.value === VoiceState.LISTENING || voiceState.value === VoiceState.PROCESSING
   if (wasVoiceTriggered) {
-    pauseVoice()  // 必须设 asr._state='paused'，否则 finally 里 resume 不生效
-    voiceState.value = VoiceState.PROCESSING
+    pauseVoice()
   }
 
   try {
@@ -269,7 +274,6 @@ async function submitText() {
 
     if (data.error) {
       addLog(`错误: ${data.error}`, 'error')
-      voiceState.value = VoiceState.PAUSED
       return
     }
 
@@ -329,7 +333,6 @@ async function submitText() {
 }
 
 function newConversation() {
-  pauseVoice()
   conversationId.value = ''
   currentTitle.value = ''
   currentVersionId.value = ''
@@ -341,11 +344,30 @@ function newConversation() {
   parentVersionId.value = ''
   versionTree.value = []
   selectedVersionId.value = ''
-  resumeVoice()
+}
+
+async function handleDeleteConversation(id) {
+  if (!confirm('确定删除此会话及所有版本历史？')) return
+  try {
+    await deleteConversation(id)
+    if (conversationId.value === id) {
+      conversationId.value = ''
+      currentTitle.value = ''
+      currentVersionId.value = ''
+      activeType.value = ''
+      shapes.value = []
+      diagram.value = null
+      imageUrl.value = ''
+      processLog.length = 0
+      versionTree.value = []
+    }
+    await refreshConversationList()
+  } catch (e) {
+    console.error(e)
+  }
 }
 
 async function loadConversation(id) {
-  pauseVoice()
   try {
     const c = await fetchConversation(id)
     if (c.error) return
@@ -382,10 +404,9 @@ async function loadConversation(id) {
     }
 
     refreshVersionTree()
+    resumeVoice()
   } catch (e) {
     console.error(e)
-  } finally {
-    resumeVoice()
   }
 }
 
@@ -397,7 +418,6 @@ async function refreshVersionTree() {
 }
 
 async function selectVersion(versionId) {
-  pauseVoice()
   selectedVersionId.value = versionId
   parentVersionId.value = ''
   try {
@@ -429,13 +449,11 @@ async function selectVersion(versionId) {
     await refreshVersionTree()
     refreshConversationList()
   } catch (e) { /* ignore */ }
-  resumeVoice()
 }
 
 async function continueFromVersion(versionId) {
   parentVersionId.value = versionId
   selectedVersionId.value = versionId
-  showVersionPopover.value = false
   // 从该版本恢复画布
   try {
     const detail = await fetchVersionDetail(versionId)
@@ -465,10 +483,8 @@ function onContinueFromVersion(versionId) {
 }
 
 function cancelBranch() {
-  pauseVoice()
   parentVersionId.value = ''
   selectedVersionId.value = ''
-  resumeVoice()
 }
 
 function labelForType(t) {

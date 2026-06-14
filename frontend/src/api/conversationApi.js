@@ -38,3 +38,12 @@ export async function switchVersion(conversationId, versionId) {
   })
   return res.json()
 }
+
+export async function deleteConversation(id) {
+  const res = await fetch(`${BASE_URL}/conversations/${id}`, {
+    method: 'DELETE',
+    headers: { ...getAuthHeaders() }
+  })
+  if (!res.ok) throw new Error('删除失败')
+  return res.json()
+}

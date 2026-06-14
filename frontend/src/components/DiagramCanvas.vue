@@ -272,6 +272,8 @@ function toLogicFlowData(diagram, cw, ch) {
     case 'flowchart':     positions = layeredLayout(rawNodes, rawEdges, cw, ch); break
     case 'mindmap':       positions = radialLayout(rawNodes, rawEdges, cw, ch); break
     case 'er':            positions = forceLayout(rawNodes, rawEdges, cw, ch); break
+    case 'class':         positions = forceLayout(rawNodes, rawEdges, cw, ch); break
+    case 'usecase':       positions = forceLayout(rawNodes, rawEdges, cw, ch); break
     case 'architecture':
     default:              positions = gridLayout(rawNodes, cw, ch); break
   }
@@ -313,11 +315,21 @@ function toLogicFlowData(diagram, cw, ch) {
 }
 
 function nodeFill(type) {
-  const m = { start: '#f0fdf4', end: '#fef2f2', decision: '#fefce8', entity: '#ffffff' }
+  const m = {
+    start: '#f0fdf4', end: '#fef2f2', decision: '#fefce8',
+    entity: '#ffffff',
+    class: '#eff6ff', interface: '#fefce8', abstract: '#fef2f2',
+    actor: '#f0fdf4', usecase: '#fff7ed'
+  }
   return m[type] || '#ffffff'
 }
 function nodeStroke(type) {
-  const m = { decision: '#f59e0b', start: '#22c55e', end: '#ef4444', entity: '#e2e8f0' }
+  const m = {
+    decision: '#f59e0b', start: '#22c55e', end: '#ef4444',
+    entity: '#e2e8f0',
+    class: '#3b82f6', interface: '#eab308', abstract: '#ef4444',
+    actor: '#22c55e', usecase: '#f97316'
+  }
   return m[type] || '#e2e8f0'
 }
 

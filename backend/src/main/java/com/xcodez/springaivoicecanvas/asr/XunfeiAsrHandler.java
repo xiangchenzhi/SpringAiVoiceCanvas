@@ -279,13 +279,11 @@ public class XunfeiAsrHandler implements WebSocketHandler {
                     String fullText = state.resultBuf.toString().trim();
                     log.info("讯飞累积结果: '{}' ({} 字)", fullText, fullText.length());
                     state.resultBuf.setLength(0); // 清空准备下一句
-                    if (!fullText.isEmpty()) {
-                        String json = mapper.writeValueAsString(Map.of(
-                                "type", "final",
-                                "text", fullText
-                        ));
-                        sendToFrontend(state, json);
-                    }
+                    String json = mapper.writeValueAsString(Map.of(
+                            "type", "final",
+                            "text", fullText
+                    ));
+                    sendToFrontend(state, json);
                     try { session.close(); } catch (Exception ignored) {}
                 } else {
                     // interim：只发给前端做 UI 展示提示，不触发业务

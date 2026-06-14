@@ -95,4 +95,12 @@ function timeAgo(ts) {
 .item-title { font-size: 13px; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item-meta { font-size: 11px; color: #64748b; margin-top: 2px; }
 .sidebar-empty { text-align: center; color: #475569; font-size: 13px; padding: 24px 0; }
+
+/* ---- 滚动条 ---- */
+.sidebar-list::-webkit-scrollbar { width: 4px; }
+.sidebar-list::-webkit-scrollbar-track { background: transparent; }
+.sidebar-list::-webkit-scrollbar-thumb {
+  background: #334155; border-radius: 4px;
+}
+.sidebar-list::-webkit-scrollbar-thumb:hover { background: #475569; }
 </style>

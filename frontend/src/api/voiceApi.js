@@ -1,10 +1,13 @@
+import { getAuthHeaders } from './authApi.js'
+
 const BASE_URL = '/api'
 
 export async function sendVoiceCommand(transcript) {
   const response = await fetch(`${BASE_URL}/voice`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...getAuthHeaders()
     },
     body: JSON.stringify({
       transcript,

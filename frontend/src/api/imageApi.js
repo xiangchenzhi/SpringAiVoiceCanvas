@@ -1,9 +1,11 @@
+import { getAuthHeaders } from './authApi.js'
+
 const BASE_URL = '/api'
 
 export async function generateImage(prompt) {
   const response = await fetch(`${BASE_URL}/image/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ prompt })
   })
 

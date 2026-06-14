@@ -9,7 +9,7 @@
  */
 export class XunfeiAsrClient {
   static SILENCE_GAP_MS = 2000
-  static SPEECH_THRESHOLD = 0.02
+  static SPEECH_THRESHOLD = 0.03
   static TARGET_SAMPLE_RATE = 16000
   static WS_URL = 'ws://localhost:8080/ws/asr'
   static BUF_SIZE = 4096

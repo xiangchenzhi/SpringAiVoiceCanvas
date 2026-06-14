@@ -84,7 +84,11 @@ public class UnifiedController {
             String convType = existingConv != null ? existingConv.getConversationType() : null;
             if (convType != null && !convType.isBlank()) {
                 // 已确定类型的会话，跳过 AI 分类，直接用存储的类型
-                intent = "DIAGRAM".equals(convType) ? "diagram" : "image";
+                intent = switch (convType) {
+                    case "DIAGRAM" -> "diagram";
+                    case "SHAPE" -> "shape";
+                    default -> "image";
+                };
                 log.info("会话 {} 类型已知={}，跳过 AI 意图分类", conversationId, convType);
             } else {
                 try {
@@ -97,7 +101,7 @@ public class UnifiedController {
 
             // 补充 conversationType
             if (isNew) {
-                String newConvType = intent.equals("image") ? "IMAGE" : "DIAGRAM";
+                String newConvType = intent.equals("image") ? "IMAGE" : intent.equals("shape") ? "SHAPE" : "DIAGRAM";
                 conversationService.updateConversationType(conversationId, newConvType);
             }
 

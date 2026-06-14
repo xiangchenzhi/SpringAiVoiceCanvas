@@ -1,5 +1,6 @@
 <template>
-  <div class="app-shell">
+  <LoginView v-if="!loggedIn" @loggedIn="loggedIn = true" />
+  <div class="app-shell" v-else>
     <!-- ========== 侧边栏 ========== -->
     <Sidebar
       :conversations="conversationList"
@@ -56,15 +57,8 @@
       <ProcessLog :entries="processLog" />
 
       <div class="chat-input-area">
-        <textarea
-          v-model="inputText"
-          class="chat-textarea"
-          placeholder="描述你想要什么..."
-          rows="3"
-          @keydown.enter.exact="submitText"
-          :disabled="loading"
-        ></textarea>
-        <div class="chat-actions">
+        <!-- 底部工具栏：语音按钮 + 文字输入切换 -->
+        <div class="input-toolbar">
           <button
             class="voice-btn"
             :class="{ listening: voiceState === 'LISTENING' }"
@@ -72,15 +66,34 @@
             :disabled="loading || !voiceSupported || voiceState === 'PROCESSING'"
             :title="voiceSupported ? '语音输入' : '浏览器不支持语音识别'"
           >
-            {{ voiceState === 'LISTENING' ? '🎙️' : '🎤' }}
+            {{ voiceState === 'LISTENING' ? '🎙️ 监听中' : '🎤 语音' }}
           </button>
-          <span class="char-hint">Enter 发送</span>
-          <button class="send-btn" @click="submitText" :disabled="loading || !inputText.trim()">
-            <span v-if="loading" class="spinner"></span>
-            <span v-else>➤</span>
-          </button>
+          <div class="toolbar-right">
+            <span v-if="voiceState === 'LISTENING' && voiceText" class="voice-text-inline">{{ voiceText }}</span>
+            <button class="text-toggle-btn" @click="showTextInput = !showTextInput" :title="showTextInput ? '收起文字输入' : '展开文字输入'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              {{ showTextInput ? '收起' : '文字' }}
+            </button>
+          </div>
         </div>
-        <div v-if="voiceState === 'LISTENING' && voiceText" class="voice-text">识别：{{ voiceText }}</div>
+        <template v-if="showTextInput">
+          <textarea
+            v-model="inputText"
+            class="chat-textarea"
+            placeholder="描述你想要什么..."
+            rows="3"
+            @keydown.enter.exact="submitText"
+            :disabled="loading"
+          ></textarea>
+          <div class="chat-actions">
+            <span class="char-hint">Enter 发送</span>
+            <button class="send-btn" @click="submitText" :disabled="loading || !inputText.trim()">
+              <span v-if="loading" class="spinner"></span>
+              <span v-else>➤</span>
+            </button>
+          </div>
+          <div v-if="voiceState === 'LISTENING' && voiceText" class="voice-text">识别：{{ voiceText }}</div>
+        </template>
       </div>
     </div>
 
@@ -105,7 +118,9 @@ import ImageCanvas from './components/ImageCanvas.vue'
 import ProcessLog from './components/ProcessLog.vue'
 import Sidebar from './components/Sidebar.vue'
 import VersionTree from './components/VersionTree.vue'
+import LoginView from './components/LoginView.vue'
 import { XunfeiAsrClient } from './api/xunfeiAsrClient.js'
+import { isLoggedIn } from './api/authApi.js'
 import { sendIntent } from './api/intentApi.js'
 import { fetchConversations, fetchConversation, fetchVersionTree, fetchVersionDetail, switchVersion } from './api/conversationApi.js'
 
@@ -125,6 +140,8 @@ const parentVersionId = ref('')
 const versionTree = ref([])
 const selectedVersionId = ref('')
 const showVersionPopover = ref(false)
+const loggedIn = ref(isLoggedIn())
+const showTextInput = ref(false)
 
 // ====== 语音状态机（讯飞 ASR） ======
 const voiceSupported = ref(true)
@@ -137,6 +154,12 @@ function createAsr() {
   asr = new XunfeiAsrClient({
     onInterim: (text) => { voiceText.value = text },
     onFinal: (text) => {
+      if (!text || !text.trim()) {
+        // 空结果：没人说话/VAD误触发，重置状态并恢复监听
+        pauseVoice()
+        resumeVoice()
+        return
+      }
       inputText.value = text
       submitText()
     },
@@ -182,8 +205,17 @@ watch(showVersionPopover, (val) => {
 })
 
 onMounted(() => {
-  refreshConversationList()
-  startVoice()
+  if (loggedIn.value) {
+    refreshConversationList()
+    startVoice()
+  }
+})
+
+watch(loggedIn, (val) => {
+  if (val) {
+    refreshConversationList()
+    startVoice()
+  }
 })
 
 async function refreshConversationList() {
@@ -197,16 +229,16 @@ function addLog(msg, type = 'info') {
 function executeCommand(cmd) {
   switch (cmd.action) {
     case 'circle':
-      shapes.value.push({ type: 'circle', cx: cmd.params.cx ?? 500, cy: cmd.params.cy ?? 300, r: cmd.params.r ?? 50, color: cmd.params.color ?? 'black' })
+      shapes.value.push({ type: 'circle', cx: cmd.params.cx ?? 500, cy: cmd.params.cy ?? 300, r: cmd.params.r ?? 50, color: cmd.params.color ?? 'black', opacity: cmd.params.opacity, strokeWidth: cmd.params.strokeWidth })
       break
     case 'rect':
-      shapes.value.push({ type: 'rect', x: cmd.params.x ?? 450, y: cmd.params.y ?? 260, width: cmd.params.width ?? 100, height: cmd.params.height ?? 80, color: cmd.params.color ?? 'black' })
+      shapes.value.push({ type: 'rect', x: cmd.params.x ?? 450, y: cmd.params.y ?? 260, width: cmd.params.width ?? 100, height: cmd.params.height ?? 80, color: cmd.params.color ?? 'black', opacity: cmd.params.opacity, strokeWidth: cmd.params.strokeWidth })
       break
     case 'triangle':
-      shapes.value.push({ type: 'triangle', cx: cmd.params.cx ?? 500, cy: cmd.params.cy ?? 300, size: cmd.params.size ?? 60, color: cmd.params.color ?? 'black' })
+      shapes.value.push({ type: 'triangle', cx: cmd.params.cx ?? 500, cy: cmd.params.cy ?? 300, size: cmd.params.size ?? 60, color: cmd.params.color ?? 'black', opacity: cmd.params.opacity, strokeWidth: cmd.params.strokeWidth })
       break
     case 'line':
-      shapes.value.push({ type: 'line', x1: cmd.params.x1 ?? 0, y1: cmd.params.y1 ?? 0, x2: cmd.params.x2 ?? 100, y2: cmd.params.y2 ?? 100, color: cmd.params.color ?? 'black' })
+      shapes.value.push({ type: 'line', x1: cmd.params.x1 ?? 0, y1: cmd.params.y1 ?? 0, x2: cmd.params.x2 ?? 100, y2: cmd.params.y2 ?? 100, color: cmd.params.color ?? 'black', strokeWidth: cmd.params.strokeWidth ?? 1, opacity: cmd.params.opacity })
       break
     case 'text':
       shapes.value.push({ type: 'text', x: cmd.params.x ?? 500, y: cmd.params.y ?? 300, content: cmd.params.content ?? '', color: cmd.params.color ?? 'black', fontSize: cmd.params.fontSize ?? 24 })
@@ -237,6 +269,7 @@ async function submitText() {
 
     if (data.error) {
       addLog(`错误: ${data.error}`, 'error')
+      voiceState.value = VoiceState.PAUSED
       return
     }
 
@@ -529,9 +562,27 @@ body {
   cursor: pointer;
 }
 .vp-cancel-btn:hover { background: #f59e0b22; }
-.chat-input-area { padding: 12px; border-top: 1px solid #334155; flex-shrink: 0; margin-top: auto; }
+.chat-input-area { padding: 10px 12px; border-top: 1px solid #334155; flex-shrink: 0; margin-top: auto; }
+.input-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.toolbar-right {
+  display: flex; align-items: center; gap: 8px;
+}
+.voice-text-inline {
+  font-size: 11px; color: #60a5fa; max-width: 120px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.text-toggle-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 6px 10px; border-radius: 8px;
+  border: 1px solid #334155; background: #1e293b;
+  color: #94a3b8; font-size: 12px; cursor: pointer;
+  transition: all .2s;
+}
+.text-toggle-btn:hover { border-color: #60a5fa; color: #e2e8f0; }
 .chat-textarea {
-  width: 100%; padding: 12px; border-radius: 10px;
+  width: 100%; padding: 12px; border-radius: 10px; margin-top: 10px;
   border: 1px solid #475569; background: #0f172a; color: #e2e8f0;
   font-size: 14px; resize: none; outline: none;
   font-family: inherit; line-height: 1.5;
@@ -550,9 +601,10 @@ body {
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .send-btn:hover:not(:disabled) { opacity: 0.85; }
 .voice-btn {
-  width: 36px; height: 36px; border-radius: 50%; border: 1px solid #475569;
-  background: #1e293b; color: #e2e8f0; font-size: 16px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 10px; border-radius: 8px;
+  border: 1px solid #475569; background: #1e293b;
+  color: #e2e8f0; font-size: 12px; cursor: pointer;
   transition: all 0.2s;
 }
 .voice-btn:hover:not(:disabled) { border-color: #60a5fa; color: #60a5fa; }

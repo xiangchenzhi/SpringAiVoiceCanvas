@@ -8,25 +8,25 @@
         <circle
           v-if="shape.type === 'circle'"
           :cx="shape.cx" :cy="shape.cy" :r="shape.r"
-          :fill="shape.color" fill-opacity="0.7"
-          :stroke="shape.color" stroke-width="2"
+          :fill="shape.color" :fill-opacity="shape.opacity ?? 0.7"
+          :stroke="shape.color" :stroke-width="shape.strokeWidth ?? 2"
         />
         <rect
           v-else-if="shape.type === 'rect'"
           :x="shape.x" :y="shape.y" :width="shape.width" :height="shape.height"
-          :fill="shape.color" fill-opacity="0.7" rx="6"
-          :stroke="shape.color" stroke-width="2"
+          :fill="shape.color" :fill-opacity="shape.opacity ?? 0.7" rx="6"
+          :stroke="shape.color" :stroke-width="shape.strokeWidth ?? 2"
         />
         <polygon
           v-else-if="shape.type === 'triangle'"
           :points="trianglePoints(shape)"
-          :fill="shape.color" fill-opacity="0.7"
-          :stroke="shape.color" stroke-width="2"
+          :fill="shape.color" :fill-opacity="shape.opacity ?? 0.7"
+          :stroke="shape.color" :stroke-width="shape.strokeWidth ?? 2"
         />
         <line
           v-else-if="shape.type === 'line'"
           :x1="shape.x1" :y1="shape.y1" :x2="shape.x2" :y2="shape.y2"
-          :stroke="shape.color" stroke-width="2.5" stroke-linecap="round"
+          :stroke="shape.color" :stroke-width="shape.strokeWidth ?? 2.5" stroke-linecap="round"
         />
         <text
           v-else-if="shape.type === 'text'"

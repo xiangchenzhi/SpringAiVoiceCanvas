@@ -1,3 +1,5 @@
+import { getAuthHeaders } from './authApi.js'
+
 const BASE_URL = '/api'
 
 export async function sendIntent(transcript, conversationId, parentVersionId) {
@@ -5,7 +7,7 @@ export async function sendIntent(transcript, conversationId, parentVersionId) {
   if (parentVersionId) body.parentVersionId = parentVersionId
   const response = await fetch(`${BASE_URL}/intent`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(body)
   })
 
